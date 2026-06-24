@@ -1,0 +1,95 @@
+# CodexFloat
+
+Windows floating monitor for Codex remaining usage, reset time, and reset-card expiry.
+
+This project is designed as a small single-file WinForms app. It reads local encrypted credentials, calls Codex/ChatGPT internal backend endpoints, and shows the result in a compact floating water-level widget.
+
+## Features
+
+- Circular floating widget with animated water level.
+- Rotating `5h` and `Weekly` remaining-usage display.
+- Countdown ring for reset time.
+- Click to expand full details; leave the detail panel to collapse.
+- Reset-card expiry display.
+- Local DPAPI-encrypted `ACCESS_TOKEN` and `ACCOUNT_ID` storage.
+- Optional auto-detection from common Windows Codex/ChatGPT JSON locations.
+- Startup, opacity, always-on-top, click-through, and lock-position settings.
+- The same behavior toggles are also available from the floating widget context menu.
+- Unified language setting for tray menu, floating menu, details, settings, and about dialogs.
+- Submenus automatically open to the left when opening to the right would leave the floating widget's screen.
+- Theme presets inspired by desktop traffic-monitor widgets.
+- Custom app logo and multi-size Windows `.ico` icon.
+
+## Download / Build
+
+Current source file:
+
+```text
+CodexFloat.cs
+```
+
+Logo and icon assets:
+
+```text
+assets/CodexFloat-logo.svg
+assets/CodexFloat-logo-256.png
+assets/CodexFloat.ico
+```
+
+Build with Windows .NET Framework compiler:
+
+```powershell
+.\build.ps1
+```
+
+The generated executable is:
+
+```text
+CodexFloat.exe
+```
+
+## Credentials
+
+Config path:
+
+```text
+%APPDATA%\CodexFloat\config.json
+```
+
+On first launch, CodexFloat can migrate an existing legacy config from:
+
+```text
+%APPDATA%\CodexResetMonitor\config.json
+```
+
+Credentials are stored as:
+
+```text
+access_token_dpapi
+account_id_dpapi
+```
+
+Both values are encrypted by Windows DPAPI for the current Windows user. The settings UI never displays saved credentials in plaintext.
+
+## GitHub Publishing
+
+Recommended steps for publishing to `https://github.com/RayOhmie`:
+
+```powershell
+git init
+git add .
+git commit -m "Initial open source release"
+git branch -M main
+git remote add origin https://github.com/RayOhmie/CodexFloat.git
+git push -u origin main
+```
+
+Create an empty repository named `CodexFloat` on GitHub first, then run the commands above from this folder.
+
+## Important Note
+
+The current API endpoints are internal ChatGPT/Codex `backend-api` endpoints, not public stable OpenAI API contracts. They may change without notice.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
