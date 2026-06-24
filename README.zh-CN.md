@@ -98,6 +98,7 @@ https://github.com/RayOhmie
 - 5 小时窗口剩余额度、进度条、重置倒计时。
 - 1 周窗口剩余额度、进度条、重置倒计时。
 - 两张或多张重置卡的到期倒计时和具体时间。
+- 模型 IQ 参考分数，数据来源为 [Codex Radar](https://codexradar.com/)，感谢 Codex Radar 提供数据参考。
 
 重置时间格式：
 

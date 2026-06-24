@@ -2,6 +2,15 @@
 
 All notable public changes to CodexFloat will be documented in this file.
 
+## 0.1.46 - 2026-06-24
+
+- Open the English Codex Radar page from the English About dialog and README.
+
+## 0.1.45 - 2026-06-24
+
+- Add Codex Radar attribution in About and README for model IQ data.
+- Write bilingual Chinese and English error logs.
+
 ## 0.1.44 - 2026-06-24
 
 Initial open source release.

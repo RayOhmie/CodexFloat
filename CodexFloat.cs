@@ -20,9 +20,9 @@ using WinFormsTimer = System.Windows.Forms.Timer;
 [assembly: AssemblyCompany("RayOhmie")]
 [assembly: AssemblyProduct("CodexFloat")]
 [assembly: AssemblyCopyright("Copyright (C) 2026 By RayOhmie")]
-[assembly: AssemblyVersion("0.1.44.0")]
-[assembly: AssemblyFileVersion("0.1.44.0")]
-[assembly: AssemblyInformationalVersion("0.1.44")]
+[assembly: AssemblyVersion("0.1.46.0")]
+[assembly: AssemblyFileVersion("0.1.46.0")]
+[assembly: AssemblyInformationalVersion("0.1.46")]
 
 namespace CodexFloat
 {
@@ -692,6 +692,8 @@ namespace CodexFloat
         public const string AuthorMailto = "mailto:RayOhmie@gmail.com";
         public const string ProjectGithub = "https://github.com/RayOhmie/CodexFloat";
         public const string Releases = "https://github.com/RayOhmie/CodexFloat/releases";
+        public const string CodexRadar = "https://codexradar.com/";
+        public const string CodexRadarEnglish = "https://codexradar.com/en/";
     }
 
     internal static class LinkOpener
@@ -1183,11 +1185,22 @@ namespace CodexFloat
                 var code = string.IsNullOrWhiteSpace(errorCode) ? "UNKNOWN" : SafeFilePart(errorCode);
                 var path = Path.Combine(LogDir, stamp + "-" + code + ".log");
                 var sb = new StringBuilder();
-                sb.AppendLine("CodexFloat error log");
-                sb.AppendLine("Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-                sb.AppendLine("Code: " + (errorCode ?? "--"));
-                sb.AppendLine("Summary: " + errorMessage);
+                var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                var bilingual = ErrorTextForCode(errorCode, errorMessage);
+                sb.AppendLine("CodexFloat Error Log / CodexFloat 错误日志");
+                sb.AppendLine("Time / 时间: " + now);
+                sb.AppendLine("Code / 错误代码: " + (errorCode ?? "--"));
                 sb.AppendLine();
+                sb.AppendLine("[中文]");
+                sb.AppendLine("摘要: " + bilingual.ChineseSummary);
+                sb.AppendLine("处理建议: " + bilingual.ChineseAdvice);
+                sb.AppendLine();
+                sb.AppendLine("[English]");
+                sb.AppendLine("Summary: " + bilingual.EnglishSummary);
+                sb.AppendLine("Suggested action: " + bilingual.EnglishAdvice);
+                sb.AppendLine();
+                sb.AppendLine("[Original detail / 原始详情]");
+                sb.AppendLine("Original summary / 原始摘要: " + errorMessage);
                 sb.AppendLine(errorDetail ?? "");
                 File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
             }
@@ -1210,6 +1223,56 @@ namespace CodexFloat
                 if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') sb.Append(ch);
             }
             return sb.Length == 0 ? "UNKNOWN" : sb.ToString();
+        }
+
+        private static ErrorLogText ErrorTextForCode(string errorCode, string fallback)
+        {
+            var code = (errorCode ?? "").Trim().ToUpperInvariant();
+            switch (code)
+            {
+                case "MISSING_CREDENTIALS":
+                    return new ErrorLogText("未找到 Codex 登录凭据。", "请先启动 Codex 并确认已登录，然后在设置中使用自动读取，或手动保存 ACCESS_TOKEN 和 ACCOUNT_ID。", "No Codex login credentials were found.", "Start Codex and make sure you are signed in, then use Auto Import in Settings or manually save ACCESS_TOKEN and ACCOUNT_ID.");
+                case "AUTH_EXPIRED":
+                case "UNAUTHORIZED":
+                    return new ErrorLogText("登录凭据已失效或被服务端拒绝。", "请启动 Codex 刷新登录状态，然后在设置中重新自动读取并保存凭据。", "The saved login credentials are expired or were rejected by the service.", "Start Codex to refresh the login state, then auto-import and save credentials again in Settings.");
+                case "NETWORK_UNAVAILABLE":
+                    return new ErrorLogText("网络不可用，无法连接 ChatGPT/Codex 后端。", "请检查网络、代理或防火墙，然后刷新。", "Network is unavailable and CodexFloat cannot connect to the ChatGPT/Codex backend.", "Check your network, proxy, or firewall, then refresh.");
+                case "CONNECTION_INTERRUPTED":
+                    return new ErrorLogText("连接被临时中断。", "这通常和电脑睡眠唤醒、网络/代理切换或 HTTPS 连接复用有关；请稍后刷新。", "The backend connection was interrupted.", "This is often related to sleep/wake, network or proxy switching, or HTTPS connection reuse. Refresh again later.");
+                case "REQUEST_TIMEOUT":
+                    return new ErrorLogText("请求超时。", "请检查网络或代理状态，然后刷新。", "The request timed out.", "Check your network or proxy status, then refresh.");
+                case "SERVER_UNAVAILABLE":
+                    return new ErrorLogText("服务暂时不可用。", "ChatGPT/Codex 后端可能暂时不可用，请稍后刷新。", "The service is temporarily unavailable.", "The ChatGPT/Codex backend may be temporarily unavailable. Refresh again later.");
+                case "API_CHANGED":
+                    return new ErrorLogText("接口可能已经变化。", "当前版本无法解析接口返回内容，请检查更新。", "The API may have changed.", "The current version cannot parse the response. Check for updates.");
+                case "CREDENTIAL_CONFIG_ERROR":
+                    return new ErrorLogText("本地加密凭据无法解密。", "请在设置中重新自动读取或手动保存凭据。", "The locally encrypted credentials could not be decrypted.", "Auto-import or manually save credentials again in Settings.");
+                case "HTTP_ERROR":
+                    return new ErrorLogText("请求被服务端拒绝。", "请确认 Codex 登录状态和账号权限，然后刷新。", "The request was rejected by the server.", "Check Codex sign-in status and account access, then refresh.");
+                case "CODEX_RADAR_UNAVAILABLE":
+                    return new ErrorLogText("无法读取 Codex Radar 模型 IQ 数据。", "请检查网络；这不会影响 Codex 用量数据读取。", "Codex Radar model IQ data could not be loaded.", "Check your network. This does not affect Codex usage data.");
+                case "CODEX_RADAR_EMPTY":
+                    return new ErrorLogText("Codex Radar 返回内容里没有可用的模型 IQ 分数。", "请稍后刷新，或等待 Codex Radar 数据恢复。", "The Codex Radar response did not contain usable model IQ scores.", "Refresh later or wait for Codex Radar data to recover.");
+                default:
+                    var message = string.IsNullOrWhiteSpace(fallback) ? "未知错误。" : fallback;
+                    return new ErrorLogText(message, "请根据原始详情排查；如果问题持续存在，请查看是否有新版。", message, "Check the original detail below. If the issue persists, check for updates.");
+            }
+        }
+
+        private struct ErrorLogText
+        {
+            public readonly string ChineseSummary;
+            public readonly string ChineseAdvice;
+            public readonly string EnglishSummary;
+            public readonly string EnglishAdvice;
+
+            public ErrorLogText(string chineseSummary, string chineseAdvice, string englishSummary, string englishAdvice)
+            {
+                this.ChineseSummary = chineseSummary;
+                this.ChineseAdvice = chineseAdvice;
+                this.EnglishSummary = englishSummary;
+                this.EnglishAdvice = englishAdvice;
+            }
         }
     }
 
@@ -3546,6 +3609,7 @@ namespace CodexFloat
 
             AddLinkAnchor(row, AboutLinkText("\u8054\u7cfb\u4f5c\u8005", "Contact"), AppLinks.AuthorMailto);
             AddLinkAnchor(row, AboutLinkText("Github", "GitHub"), AppLinks.ProjectGithub);
+            AddLinkAnchor(row, AboutLinkText("\u611f\u8c22 Codex Radar", "Thanks: Codex Radar"), T.IsChinese ? AppLinks.CodexRadar : AppLinks.CodexRadarEnglish);
             LayoutAboutLinks(row);
 
             layout.Controls.Add(row, 0, layout.Controls.Count);
@@ -3573,6 +3637,12 @@ namespace CodexFloat
             if (string.Equals(url, AppLinks.AuthorMailto, StringComparison.OrdinalIgnoreCase))
             {
                 var title = MailTitleText();
+                link.AccessibleDescription = title;
+                this.linkTips.SetToolTip(link, title);
+            }
+            if (string.Equals(url, AppLinks.CodexRadar, StringComparison.OrdinalIgnoreCase) || string.Equals(url, AppLinks.CodexRadarEnglish, StringComparison.OrdinalIgnoreCase))
+            {
+                var title = T.IsChinese ? "\u6a21\u578b IQ \u6570\u636e\u6765\u6e90\uff1aCodex Radar\uff0c\u611f\u8c22\u5176\u63d0\u4f9b\u6570\u636e\u53c2\u8003\u3002" : "Model IQ data source: Codex Radar. Thanks for the data reference.";
                 link.AccessibleDescription = title;
                 this.linkTips.SetToolTip(link, title);
             }

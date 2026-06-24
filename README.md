@@ -20,6 +20,10 @@ This project is designed as a small single-file WinForms app. It reads local enc
 - Theme presets inspired by desktop traffic-monitor widgets.
 - Custom app logo and multi-size Windows `.ico` icon.
 
+## Data Sources
+
+CodexFloat fetches model IQ reference scores from [Codex Radar](https://codexradar.com/en/). Thanks to Codex Radar for making the model IQ data available as a reference.
+
 ## Download / Build
 
 Current source file:
