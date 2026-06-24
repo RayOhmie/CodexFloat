@@ -2,6 +2,11 @@
 
 All notable public changes to CodexFloat will be documented in this file.
 
+## 0.1.47 - 2026-06-24
+
+- Publish releases with uppercase `V` version labels.
+- Fix Release note wording and encoding so `V0.1.44` is correctly treated as the initial public release.
+
 ## 0.1.46 - 2026-06-24
 
 - Open the English Codex Radar page from the English About dialog and README.
