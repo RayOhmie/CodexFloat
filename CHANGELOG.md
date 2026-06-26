@@ -4,6 +4,8 @@ All notable public changes to CodexFloat will be documented in this file.
 
 ## Unreleased
 
+## 0.1.48 - 2026-06-26
+
 - Show a separate first-run trusted-environment confirmation popup when no trusted address library exists, and keep the Environment Safety submenu arrow visible before hover.
 - Add an Environment Safety top-level menu with monitoring toggles and a trusted address library, and store user-confirmed medium-risk environments as multiple trusted records.
 - Use a public localized IP geolocation API for Chinese environment location display, with built-in mappings only as fallback text.
@@ -18,9 +20,10 @@ All notable public changes to CodexFloat will be documented in this file.
 - Position environment safety popups in the screen bottom-right and add countdown confirmation controls for safe and medium-risk states.
 - Replace environment safety Windows notifications with app-owned status popups and improve the medium-risk confirmation dialog layout.
 - Keep the floating-widget Scroll Data submenu arrow visible as soon as the right-click menu opens.
-- Add environment safety monitoring before ChatGPT queries, including startup IP/location checks, medium-risk user confirmation, and high-risk China/Hong Kong blocking.
+- Add environment safety monitoring before ChatGPT queries, including startup IP/location checks, medium-risk user confirmation, and high-risk blocking.
 - Increase the expanded detail panel content typography and contrast while keeping the top title and update timestamp unchanged.
 - Keep reset-card detail lines left-aligned within their centered text group in the expanded detail panel.
+- Remove legacy experimental files from the public source tree.
 
 ## 0.1.47 - 2026-06-24
 

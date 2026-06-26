@@ -1,5 +1,7 @@
 # CodexFloat
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Windows floating monitor for Codex remaining usage, reset time, and reset-card expiry.
 
 This project is designed as a small single-file WinForms app. It reads local encrypted credentials, calls Codex/ChatGPT internal backend endpoints, and shows the result in a compact floating water-level widget.
@@ -16,7 +18,7 @@ This project is designed as a small single-file WinForms app. It reads local enc
 - Startup, opacity, always-on-top, click-through, and lock-position settings.
 - The same behavior toggles are also available from the floating widget context menu.
 - Unified language setting for tray menu, floating menu, details, settings, and about dialogs.
-- Optional environment safety monitoring before ChatGPT backend queries, with startup IP/location checks, medium-risk confirmation, and high-risk China/Hong Kong blocking.
+- Optional environment safety monitoring before ChatGPT backend queries, with startup IP/location checks, medium-risk confirmation, and high-risk blocking.
 - User-confirmed medium-risk environments are stored in a trusted address library that can be reviewed and pruned from the Environment Safety menu.
 - On first use with no trusted address library, CodexFloat asks separately whether to set the current IP and location as the default trusted environment.
 - Submenus automatically open to the left when opening to the right would leave the floating widget's screen.
