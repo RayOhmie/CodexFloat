@@ -2,6 +2,26 @@
 
 All notable public changes to CodexFloat will be documented in this file.
 
+## Unreleased
+
+- Show a separate first-run trusted-environment confirmation popup when no trusted address library exists, and keep the Environment Safety submenu arrow visible before hover.
+- Add an Environment Safety top-level menu with monitoring toggles and a trusted address library, and store user-confirmed medium-risk environments as multiple trusted records.
+- Use a public localized IP geolocation API for Chinese environment location display, with built-in mappings only as fallback text.
+- Expand Chinese environment location mappings for common China and Malaysia IP locations, and show compact environment-risk text in the mini floating widget.
+- Use regular-weight environment popup button text and widen the medium-risk action buttons to avoid clipping in Chinese and English.
+- Match Chinese environment location order to the English location order.
+- Polish environment popup typography, button text rendering, and vertically centered IP/location content for both two-line and three-line address layouts.
+- Center environment IP/location blocks using measured prompt text height instead of fixed text bounds.
+- Vertically center environment IP/location blocks between the prompt text and confirmation buttons.
+- Add localized Chinese location lines under English environment locations, clarify medium-risk action button copy, and require explicit user choice for medium-risk prompts.
+- Add countdown confirmation to high-risk environment popups and restore clearer IP/location blocks with more spacious text layout across environment prompts.
+- Position environment safety popups in the screen bottom-right and add countdown confirmation controls for safe and medium-risk states.
+- Replace environment safety Windows notifications with app-owned status popups and improve the medium-risk confirmation dialog layout.
+- Keep the floating-widget Scroll Data submenu arrow visible as soon as the right-click menu opens.
+- Add environment safety monitoring before ChatGPT queries, including startup IP/location checks, medium-risk user confirmation, and high-risk China/Hong Kong blocking.
+- Increase the expanded detail panel content typography and contrast while keeping the top title and update timestamp unchanged.
+- Keep reset-card detail lines left-aligned within their centered text group in the expanded detail panel.
+
 ## 0.1.47 - 2026-06-24
 
 - Publish releases with uppercase `V` version labels.

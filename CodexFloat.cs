@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -47,6 +48,11 @@ namespace CodexFloat
         private readonly WinFormsTimer refreshTimer;
         private volatile bool refreshing;
         private MonitorSnapshot snapshot = MonitorSnapshot.Loading();
+        private EnvironmentStatusPopupForm environmentStatusPopup;
+        private bool startupEnvironmentCheckPending = true;
+        private bool blockedByHighRiskEnvironment;
+        private EnvironmentInfo pendingInitialTrustEnvironment;
+        private EnvironmentInfo pendingMediumRiskEnvironment;
 
         public MonitorContext()
         {
@@ -67,8 +73,9 @@ namespace CodexFloat
                 this.config.FloatingY = e.Location.Y;
                 this.store.Save(this.config);
             };
-            this.bar.RefreshRequested += delegate { this.RefreshNow(); };
+            this.bar.RefreshRequested += delegate { this.RefreshNow(true); };
             this.bar.SettingsRequested += delegate { this.ShowSettings(false); };
+            this.bar.TrustedEnvironmentsRequested += delegate { this.ShowTrustedEnvironments(); };
             this.bar.ResetPositionRequested += delegate { this.ResetPosition(); };
             this.bar.HelpRequested += delegate { this.ShowHelp(); };
             this.bar.ErrorLogRequested += delegate { this.ShowErrorLogs(); };
@@ -88,6 +95,9 @@ namespace CodexFloat
                 this.config.MouseClickThrough = e.Config.MouseClickThrough;
                 this.config.LockPosition = e.Config.LockPosition;
                 this.config.ShowUserNameInDetails = e.Config.ShowUserNameInDetails;
+                this.config.EnvironmentCheckOnStartup = e.Config.EnvironmentCheckOnStartup;
+                this.config.EnvironmentConfirmMediumRiskOnManualRefresh = e.Config.EnvironmentConfirmMediumRiskOnManualRefresh;
+                this.config.EnvironmentRecheckHighRiskOnManualRefresh = e.Config.EnvironmentRecheckHighRiskOnManualRefresh;
                 this.CopyScrollSelections(e.Config, this.config);
                 this.store.Save(this.config);
                 this.ApplyStartupSetting();
@@ -105,10 +115,10 @@ namespace CodexFloat
 
             this.refreshTimer = new WinFormsTimer();
             this.refreshTimer.Interval = Math.Max(60, this.config.RefreshSeconds) * 1000;
-            this.refreshTimer.Tick += delegate { this.RefreshNow(); };
+            this.refreshTimer.Tick += delegate { this.RefreshNow(false); };
             this.refreshTimer.Start();
 
-            this.RefreshNow();
+            this.RefreshNow(false);
         }
 
         private void TryAutoImportSilently()
@@ -154,9 +164,10 @@ namespace CodexFloat
         {
             var menu = new ContextMenuStrip();
             menu.Items.Add(T.Text("显示详情"), null, delegate { this.bar.ShowExpandedTemporarily(); });
-            menu.Items.Add(T.Text("刷新"), null, delegate { this.RefreshNow(); });
+            menu.Items.Add(T.Text("刷新"), null, delegate { this.RefreshNow(true); });
             menu.Items.Add(this.BuildAppearanceMenu());
             menu.Items.Add(this.BuildBehaviorMenu());
+            menu.Items.Add(this.BuildEnvironmentSafetyMenu());
             menu.Items.Add(this.BuildScrollDataMenu());
             menu.Items.Add(this.BuildLanguageMenu());
             menu.Items.Add(T.Text("设置"), null, delegate { this.ShowSettings(false); });
@@ -200,6 +211,22 @@ namespace CodexFloat
                 root.DropDownItems.Add(this.BuildToggleItem(T.Text("总是置顶"), this.config.AlwaysOnTop, delegate { this.ToggleAlwaysOnTop(); }));
                 root.DropDownItems.Add(this.BuildToggleItem(T.Text("鼠标穿透"), this.config.MouseClickThrough, delegate { this.ToggleMouseClickThrough(); }));
                 root.DropDownItems.Add(this.BuildToggleItem(T.Text("锁定窗口位置"), this.config.LockPosition, delegate { this.ToggleLockPosition(); }));
+            };
+            return root;
+        }
+
+        private ToolStripMenuItem BuildEnvironmentSafetyMenu()
+        {
+            var root = new ToolStripMenuItem(T.Text("env_safety_title"));
+            root.DropDownItems.Add(new ToolStripMenuItem(T.Text("env_check_on_startup")));
+            root.DropDownOpening += delegate {
+                root.DropDownItems.Clear();
+                root.DropDownItems.Add(this.BuildToggleItem(T.Text("env_check_on_startup"), this.config.EnvironmentCheckOnStartup, delegate { this.ToggleEnvironmentCheckOnStartup(); }));
+                root.DropDownItems.Add(this.BuildToggleItem(T.Text("env_confirm_medium_on_manual"), this.config.EnvironmentConfirmMediumRiskOnManualRefresh, delegate { this.ToggleEnvironmentConfirmMediumOnManual(); }));
+                root.DropDownItems.Add(this.BuildToggleItem(T.Text("env_recheck_high_on_manual"), this.config.EnvironmentRecheckHighRiskOnManualRefresh, delegate { this.ToggleEnvironmentRecheckHighOnManual(); }));
+                root.DropDownItems.Add(new ToolStripSeparator());
+                root.DropDownItems.Add(T.Text("env_trusted_library") + " (" + this.TrustedEnvironmentCount().ToString(CultureInfo.InvariantCulture) + ")", null, delegate { this.ShowTrustedEnvironments(); });
+                MenuDropDownPlacer.AttachChildren(root, this.FloatingScreenBounds);
             };
             return root;
         }
@@ -315,7 +342,42 @@ namespace CodexFloat
             this.bar.ApplyBehavior(this.config);
         }
 
+        private void ToggleEnvironmentCheckOnStartup()
+        {
+            this.config.EnvironmentCheckOnStartup = !this.config.EnvironmentCheckOnStartup;
+            this.SaveEnvironmentSettings();
+        }
+
+        private void ToggleEnvironmentConfirmMediumOnManual()
+        {
+            this.config.EnvironmentConfirmMediumRiskOnManualRefresh = !this.config.EnvironmentConfirmMediumRiskOnManualRefresh;
+            this.SaveEnvironmentSettings();
+        }
+
+        private void ToggleEnvironmentRecheckHighOnManual()
+        {
+            this.config.EnvironmentRecheckHighRiskOnManualRefresh = !this.config.EnvironmentRecheckHighRiskOnManualRefresh;
+            this.SaveEnvironmentSettings();
+        }
+
+        private void SaveEnvironmentSettings()
+        {
+            this.store.Save(this.config);
+            this.bar.ApplyBehavior(this.config);
+            this.notifyIcon.ContextMenuStrip = this.BuildTrayMenu();
+        }
+
+        private int TrustedEnvironmentCount()
+        {
+            return this.config.TrustedEnvironments == null ? 0 : this.config.TrustedEnvironments.Count;
+        }
+
         private void RefreshNow()
+        {
+            this.RefreshNow(true);
+        }
+
+        private void RefreshNow(bool manual)
         {
             if (this.refreshing) return;
             this.refreshing = true;
@@ -326,7 +388,22 @@ namespace CodexFloat
                 MonitorSnapshot next;
                 try
                 {
-                    next = this.config.HasUsableSecret() ? CodexClient.Fetch(this.config) : ErrorAdvisor.MissingCredentials();
+                    EnvironmentInfo environmentToConfirm = null;
+                    if (!this.config.HasUsableSecret())
+                    {
+                        next = ErrorAdvisor.MissingCredentials();
+                    }
+                    else
+                    {
+                        var gate = this.EvaluateEnvironmentBeforeQuery(manual);
+                        environmentToConfirm = gate.EnvironmentToConfirmAfterSuccess;
+                        next = gate.AllowQuery ? CodexClient.Fetch(this.config) : gate.BlockedSnapshot;
+                    }
+                    if (environmentToConfirm != null && next != null && next.ErrorMessage == null)
+                    {
+                        this.ConfirmEnvironment(environmentToConfirm);
+                        this.store.Save(this.config);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -342,6 +419,214 @@ namespace CodexFloat
                     this.notifyIcon.Text = next.TrayText();
                 });
             });
+        }
+
+        private EnvironmentGateResult EvaluateEnvironmentBeforeQuery(bool manual)
+        {
+            var preGate = this.PrepareEnvironmentGate(manual);
+            if (preGate != null) return preGate;
+
+            EnvironmentInfo current;
+            try
+            {
+                current = EnvironmentSafetyClient.Fetch();
+            }
+            catch (Exception ex)
+            {
+                this.ShowEnvironmentStatus(T.Text("env_check_failed_title"), T.Text("env_check_failed_message"), EnvironmentRiskLevel.Medium, null);
+                return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_CHECK_FAILED", T.Text("env_check_failed_title"), T.Text("env_check_failed_message") + "\r\n\r\n" + ex.Message));
+            }
+
+            if (current.IsHighRiskCountry())
+            {
+                this.blockedByHighRiskEnvironment = true;
+                this.pendingInitialTrustEnvironment = null;
+                this.pendingMediumRiskEnvironment = null;
+                this.ShowEnvironmentStatus(T.Text("env_high_risk_title"), T.Text("env_high_risk_message"), EnvironmentRiskLevel.High, current);
+                return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_HIGH_RISK", T.Text("env_high_risk_title"), T.Text("env_high_risk_message") + "\r\n" + current.DisplayText()));
+            }
+
+            if (!this.HasConfirmedEnvironment())
+            {
+                var firstChoice = this.PromptInitialTrustEnvironment(current);
+                if (firstChoice == EnvironmentPromptChoice.Continue)
+                {
+                    this.blockedByHighRiskEnvironment = false;
+                    this.pendingInitialTrustEnvironment = null;
+                    this.pendingMediumRiskEnvironment = null;
+                    return EnvironmentGateResult.AllowWithConfirmation(current);
+                }
+
+                this.pendingInitialTrustEnvironment = current;
+                this.pendingMediumRiskEnvironment = null;
+                return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_INITIAL_TRUST_PENDING", T.Text("env_initial_trust_title"), T.Text("env_initial_trust_pending_message") + "\r\n" + current.DisplayText()));
+            }
+
+            if (this.HasConfirmedEnvironment() && this.IsSameConfirmedEnvironment(current))
+            {
+                this.blockedByHighRiskEnvironment = false;
+                this.pendingInitialTrustEnvironment = null;
+                this.pendingMediumRiskEnvironment = null;
+                this.ShowEnvironmentStatus(T.Text("env_safe_title"), T.Text("env_safe_message"), EnvironmentRiskLevel.Safe, current);
+                return EnvironmentGateResult.Allow();
+            }
+
+            var promptMessage = T.Text("env_medium_risk_changed");
+            var choice = this.PromptMediumRiskEnvironment(current, promptMessage);
+            if (choice == EnvironmentPromptChoice.Continue)
+            {
+                this.blockedByHighRiskEnvironment = false;
+                this.pendingInitialTrustEnvironment = null;
+                this.pendingMediumRiskEnvironment = null;
+                return EnvironmentGateResult.AllowWithConfirmation(current);
+            }
+
+            this.pendingMediumRiskEnvironment = current;
+            return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_MEDIUM_RISK_PENDING", T.Text("env_medium_risk_title"), promptMessage + "\r\n" + current.DisplayText()));
+        }
+
+        private EnvironmentGateResult PrepareEnvironmentGate(bool manual)
+        {
+            if (this.pendingInitialTrustEnvironment != null)
+            {
+                if (!manual)
+                {
+                    return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_INITIAL_TRUST_PENDING", T.Text("env_initial_trust_title"), T.Text("env_initial_trust_pending_message")));
+                }
+                return null;
+            }
+
+            if (this.pendingMediumRiskEnvironment != null)
+            {
+                if (!manual)
+                {
+                    return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_MEDIUM_RISK_PENDING", T.Text("env_medium_risk_title"), T.Text("env_medium_pending_message")));
+                }
+                if (!this.config.EnvironmentConfirmMediumRiskOnManualRefresh)
+                {
+                    var environmentToConfirm = this.pendingMediumRiskEnvironment;
+                    this.pendingMediumRiskEnvironment = null;
+                    return EnvironmentGateResult.AllowWithConfirmation(environmentToConfirm);
+                }
+                return null;
+            }
+
+            if (this.blockedByHighRiskEnvironment)
+            {
+                if (!manual)
+                {
+                    return EnvironmentGateResult.Block(MonitorSnapshot.Error("ENV_HIGH_RISK", T.Text("env_high_risk_title"), T.Text("env_high_risk_wait_message")));
+                }
+                if (!this.config.EnvironmentRecheckHighRiskOnManualRefresh)
+                {
+                    this.blockedByHighRiskEnvironment = false;
+                    return EnvironmentGateResult.Allow();
+                }
+                return null;
+            }
+
+            if (this.startupEnvironmentCheckPending)
+            {
+                this.startupEnvironmentCheckPending = false;
+                if (this.config.EnvironmentCheckOnStartup) return null;
+            }
+
+            return EnvironmentGateResult.Allow();
+        }
+
+        private EnvironmentPromptChoice PromptMediumRiskEnvironment(EnvironmentInfo info, string message)
+        {
+            if (this.bar.IsDisposed) return EnvironmentPromptChoice.Wait;
+            var choice = EnvironmentPromptChoice.Wait;
+            this.bar.Invoke(new MethodInvoker(delegate {
+                using (var form = new EnvironmentRiskPromptForm(info, message))
+                {
+                    form.PlaceBottomRight(Screen.FromControl(this.bar).WorkingArea);
+                    form.ShowDialog(this.bar);
+                    choice = form.Choice;
+                }
+            }));
+            return choice;
+        }
+
+        private EnvironmentPromptChoice PromptInitialTrustEnvironment(EnvironmentInfo info)
+        {
+            if (this.bar.IsDisposed) return EnvironmentPromptChoice.Wait;
+            var choice = EnvironmentPromptChoice.Wait;
+            this.bar.Invoke(new MethodInvoker(delegate {
+                using (var form = new EnvironmentInitialTrustPromptForm(info))
+                {
+                    form.PlaceBottomRight(Screen.FromControl(this.bar).WorkingArea);
+                    form.ShowDialog(this.bar);
+                    choice = form.Choice;
+                }
+            }));
+            return choice;
+        }
+
+        private void ShowEnvironmentStatus(string title, string message, EnvironmentRiskLevel riskLevel, EnvironmentInfo info)
+        {
+            this.PostToUi(delegate {
+                if (this.bar.IsDisposed) return;
+                if (this.environmentStatusPopup != null && !this.environmentStatusPopup.IsDisposed)
+                {
+                    this.environmentStatusPopup.Close();
+                }
+                this.environmentStatusPopup = new EnvironmentStatusPopupForm(riskLevel, title, message, info);
+                this.environmentStatusPopup.PlaceBottomRight(Screen.FromControl(this.bar).WorkingArea);
+                this.environmentStatusPopup.Show(this.bar);
+            });
+        }
+
+        private bool HasConfirmedEnvironment()
+        {
+            return this.config.TrustedEnvironments != null && this.config.TrustedEnvironments.Count > 0;
+        }
+
+        private bool IsSameConfirmedEnvironment(EnvironmentInfo info)
+        {
+            if (info == null || this.config.TrustedEnvironments == null) return false;
+            foreach (var trusted in this.config.TrustedEnvironments)
+            {
+                if (trusted != null && trusted.Matches(info)) return true;
+            }
+            return false;
+        }
+
+        private void ConfirmEnvironment(EnvironmentInfo info)
+        {
+            if (info == null || string.IsNullOrWhiteSpace(info.Ip)) return;
+            if (this.config.TrustedEnvironments == null) this.config.TrustedEnvironments = new List<TrustedEnvironment>();
+            foreach (var trusted in this.config.TrustedEnvironments)
+            {
+                if (trusted != null && trusted.Matches(info))
+                {
+                    trusted.UpdateFrom(info);
+                    this.UpdateLegacyConfirmedEnvironmentFields(trusted);
+                    return;
+                }
+            }
+            var added = TrustedEnvironment.FromInfo(info);
+            this.config.TrustedEnvironments.Add(added);
+            this.UpdateLegacyConfirmedEnvironmentFields(added);
+        }
+
+        private void UpdateLegacyConfirmedEnvironmentFields(TrustedEnvironment trusted)
+        {
+            if (trusted == null)
+            {
+                this.config.EnvironmentLastConfirmedIp = "";
+                this.config.EnvironmentLastConfirmedCountryCode = "";
+                this.config.EnvironmentLastConfirmedCountryName = "";
+                this.config.EnvironmentLastConfirmedRegion = "";
+                this.config.EnvironmentLastConfirmedCity = "";
+                return;
+            }
+            this.config.EnvironmentLastConfirmedIp = trusted.Ip;
+            this.config.EnvironmentLastConfirmedCountryCode = trusted.CountryCode;
+            this.config.EnvironmentLastConfirmedCountryName = trusted.CountryName;
+            this.config.EnvironmentLastConfirmedRegion = trusted.Region;
+            this.config.EnvironmentLastConfirmedCity = trusted.City;
         }
 
         private bool HasCurrentUsageData()
@@ -376,9 +661,26 @@ namespace CodexFloat
                     this.store.Save(this.config);
                     this.ApplyStartupSetting();
                     this.bar.ApplyBehavior(this.config);
+                    this.notifyIcon.ContextMenuStrip = this.BuildTrayMenu();
                     this.bar.SetInitialLocation(this.config.FloatingX, this.config.FloatingY);
                     this.refreshTimer.Interval = Math.Max(60, this.config.RefreshSeconds) * 1000;
-                    this.RefreshNow();
+                    this.RefreshNow(false);
+                }
+            }
+        }
+
+        private void ShowTrustedEnvironments()
+        {
+            using (var form = new TrustedEnvironmentsForm(this.config.TrustedEnvironments))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    this.config.TrustedEnvironments = form.TrustedEnvironments;
+                    var last = this.config.TrustedEnvironments.Count == 0 ? null : this.config.TrustedEnvironments[this.config.TrustedEnvironments.Count - 1];
+                    this.UpdateLegacyConfirmedEnvironmentFields(last);
+                    this.store.Save(this.config);
+                    this.bar.ApplyBehavior(this.config);
+                    this.notifyIcon.ContextMenuStrip = this.BuildTrayMenu();
                 }
             }
         }
@@ -454,6 +756,15 @@ namespace CodexFloat
         public bool ScrollShowGpt55High = true;
         public bool ScrollShowGpt55Medium = true;
         public bool ScrollShowGpt54XHigh = true;
+        public bool EnvironmentCheckOnStartup = true;
+        public bool EnvironmentConfirmMediumRiskOnManualRefresh = true;
+        public bool EnvironmentRecheckHighRiskOnManualRefresh = true;
+        public string EnvironmentLastConfirmedIp = "";
+        public string EnvironmentLastConfirmedCountryCode = "";
+        public string EnvironmentLastConfirmedCountryName = "";
+        public string EnvironmentLastConfirmedRegion = "";
+        public string EnvironmentLastConfirmedCity = "";
+        public List<TrustedEnvironment> TrustedEnvironments = new List<TrustedEnvironment>();
         public int? FloatingX;
         public int? FloatingY;
 
@@ -466,6 +777,16 @@ namespace CodexFloat
         {
             if (!string.IsNullOrWhiteSpace(this.AccountIdDpapi)) return SecretBox.Unprotect(this.AccountIdDpapi);
             return this.AccountId ?? "";
+        }
+
+        public void CopyTrustedEnvironmentsFrom(MonitorConfig source)
+        {
+            this.TrustedEnvironments = new List<TrustedEnvironment>();
+            if (source == null || source.TrustedEnvironments == null) return;
+            foreach (var item in source.TrustedEnvironments)
+            {
+                if (item != null) this.TrustedEnvironments.Add(item.Clone());
+            }
         }
     }
 
@@ -517,6 +838,26 @@ namespace CodexFloat
                 cfg.ScrollShowGpt55High = GetBool(root, "scroll_show_gpt_55_high", cfg.ScrollShowGpt55High);
                 cfg.ScrollShowGpt55Medium = GetBool(root, "scroll_show_gpt_55_medium", cfg.ScrollShowGpt55Medium);
                 cfg.ScrollShowGpt54XHigh = GetBool(root, "scroll_show_gpt_54_xhigh", cfg.ScrollShowGpt54XHigh);
+                cfg.EnvironmentCheckOnStartup = GetBool(root, "environment_check_on_startup", cfg.EnvironmentCheckOnStartup);
+                cfg.EnvironmentConfirmMediumRiskOnManualRefresh = GetBool(root, "environment_confirm_medium_risk_on_manual_refresh", cfg.EnvironmentConfirmMediumRiskOnManualRefresh);
+                cfg.EnvironmentRecheckHighRiskOnManualRefresh = GetBool(root, "environment_recheck_high_risk_on_manual_refresh", cfg.EnvironmentRecheckHighRiskOnManualRefresh);
+                cfg.EnvironmentLastConfirmedIp = GetString(root, "environment_last_confirmed_ip", cfg.EnvironmentLastConfirmedIp);
+                cfg.EnvironmentLastConfirmedCountryCode = GetString(root, "environment_last_confirmed_country_code", cfg.EnvironmentLastConfirmedCountryCode);
+                cfg.EnvironmentLastConfirmedCountryName = GetString(root, "environment_last_confirmed_country_name", cfg.EnvironmentLastConfirmedCountryName);
+                cfg.EnvironmentLastConfirmedRegion = GetString(root, "environment_last_confirmed_region", cfg.EnvironmentLastConfirmedRegion);
+                cfg.EnvironmentLastConfirmedCity = GetString(root, "environment_last_confirmed_city", cfg.EnvironmentLastConfirmedCity);
+                cfg.TrustedEnvironments = GetTrustedEnvironments(root);
+                if (cfg.TrustedEnvironments.Count == 0 && !string.IsNullOrWhiteSpace(cfg.EnvironmentLastConfirmedIp))
+                {
+                    cfg.TrustedEnvironments.Add(new TrustedEnvironment {
+                        Ip = cfg.EnvironmentLastConfirmedIp,
+                        CountryCode = cfg.EnvironmentLastConfirmedCountryCode,
+                        CountryName = cfg.EnvironmentLastConfirmedCountryName,
+                        Region = cfg.EnvironmentLastConfirmedRegion,
+                        City = cfg.EnvironmentLastConfirmedCity,
+                        ConfirmedAt = DateTime.Now.ToString("o", CultureInfo.InvariantCulture)
+                    });
+                }
                 cfg.FloatingX = GetNullableInt(root, "floating_x");
                 cfg.FloatingY = GetNullableInt(root, "floating_y");
             }
@@ -570,9 +911,74 @@ namespace CodexFloat
             root["scroll_show_gpt_55_high"] = cfg.ScrollShowGpt55High;
             root["scroll_show_gpt_55_medium"] = cfg.ScrollShowGpt55Medium;
             root["scroll_show_gpt_54_xhigh"] = cfg.ScrollShowGpt54XHigh;
+            root["environment_check_on_startup"] = cfg.EnvironmentCheckOnStartup;
+            root["environment_confirm_medium_risk_on_manual_refresh"] = cfg.EnvironmentConfirmMediumRiskOnManualRefresh;
+            root["environment_recheck_high_risk_on_manual_refresh"] = cfg.EnvironmentRecheckHighRiskOnManualRefresh;
+            var lastTrusted = LastTrustedEnvironment(cfg);
+            root["environment_last_confirmed_ip"] = lastTrusted == null ? (cfg.EnvironmentLastConfirmedIp ?? "") : lastTrusted.Ip;
+            root["environment_last_confirmed_country_code"] = lastTrusted == null ? (cfg.EnvironmentLastConfirmedCountryCode ?? "") : lastTrusted.CountryCode;
+            root["environment_last_confirmed_country_name"] = lastTrusted == null ? (cfg.EnvironmentLastConfirmedCountryName ?? "") : lastTrusted.CountryName;
+            root["environment_last_confirmed_region"] = lastTrusted == null ? (cfg.EnvironmentLastConfirmedRegion ?? "") : lastTrusted.Region;
+            root["environment_last_confirmed_city"] = lastTrusted == null ? (cfg.EnvironmentLastConfirmedCity ?? "") : lastTrusted.City;
+            root["environment_trusted_environments"] = TrustedEnvironmentDictionaries(cfg);
             if (cfg.FloatingX.HasValue) root["floating_x"] = cfg.FloatingX.Value;
             if (cfg.FloatingY.HasValue) root["floating_y"] = cfg.FloatingY.Value;
             File.WriteAllText(this.configPath, this.serializer.Serialize(root), Encoding.UTF8);
+        }
+
+        private static List<TrustedEnvironment> GetTrustedEnvironments(Dictionary<string, object> root)
+        {
+            var result = new List<TrustedEnvironment>();
+            object value;
+            if (!root.TryGetValue("environment_trusted_environments", out value) || value == null) return result;
+            var items = value as IEnumerable;
+            if (items == null || value is string) return result;
+            foreach (var item in items)
+            {
+                var dict = item as Dictionary<string, object>;
+                if (dict == null) continue;
+                var trusted = new TrustedEnvironment {
+                    Ip = GetString(dict, "ip", ""),
+                    CountryCode = GetString(dict, "country_code", ""),
+                    CountryName = GetString(dict, "country_name", ""),
+                    Region = GetString(dict, "region", ""),
+                    City = GetString(dict, "city", ""),
+                    LocalizedCountryName = GetString(dict, "localized_country_name", ""),
+                    LocalizedRegion = GetString(dict, "localized_region", ""),
+                    LocalizedCity = GetString(dict, "localized_city", ""),
+                    ConfirmedAt = GetString(dict, "confirmed_at", "")
+                };
+                if (!string.IsNullOrWhiteSpace(trusted.Ip)) result.Add(trusted);
+            }
+            return result;
+        }
+
+        private static List<Dictionary<string, object>> TrustedEnvironmentDictionaries(MonitorConfig cfg)
+        {
+            var result = new List<Dictionary<string, object>>();
+            if (cfg == null || cfg.TrustedEnvironments == null) return result;
+            foreach (var item in cfg.TrustedEnvironments)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.Ip)) continue;
+                result.Add(new Dictionary<string, object> {
+                    { "ip", item.Ip ?? "" },
+                    { "country_code", item.CountryCode ?? "" },
+                    { "country_name", item.CountryName ?? "" },
+                    { "region", item.Region ?? "" },
+                    { "city", item.City ?? "" },
+                    { "localized_country_name", item.LocalizedCountryName ?? "" },
+                    { "localized_region", item.LocalizedRegion ?? "" },
+                    { "localized_city", item.LocalizedCity ?? "" },
+                    { "confirmed_at", item.ConfirmedAt ?? "" }
+                });
+            }
+            return result;
+        }
+
+        private static TrustedEnvironment LastTrustedEnvironment(MonitorConfig cfg)
+        {
+            if (cfg == null || cfg.TrustedEnvironments == null || cfg.TrustedEnvironments.Count == 0) return null;
+            return cfg.TrustedEnvironments[cfg.TrustedEnvironments.Count - 1];
         }
 
         private static string GetString(Dictionary<string, object> root, string key, string fallback)
@@ -606,6 +1012,924 @@ namespace CodexFloat
             int parsed;
             if (!root.TryGetValue(key, out value) || value == null) return null;
             return int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out parsed) ? (int?)parsed : null;
+        }
+    }
+
+    internal enum EnvironmentRiskLevel
+    {
+        Safe,
+        Medium,
+        High
+    }
+
+    internal enum EnvironmentPromptChoice
+    {
+        Continue,
+        Wait
+    }
+
+    internal sealed class EnvironmentGateResult
+    {
+        public readonly bool AllowQuery;
+        public readonly MonitorSnapshot BlockedSnapshot;
+        public readonly EnvironmentInfo EnvironmentToConfirmAfterSuccess;
+
+        private EnvironmentGateResult(bool allowQuery, MonitorSnapshot blockedSnapshot, EnvironmentInfo environmentToConfirmAfterSuccess)
+        {
+            this.AllowQuery = allowQuery;
+            this.BlockedSnapshot = blockedSnapshot;
+            this.EnvironmentToConfirmAfterSuccess = environmentToConfirmAfterSuccess;
+        }
+
+        public static EnvironmentGateResult Allow()
+        {
+            return new EnvironmentGateResult(true, null, null);
+        }
+
+        public static EnvironmentGateResult AllowWithConfirmation(EnvironmentInfo info)
+        {
+            return new EnvironmentGateResult(true, null, info);
+        }
+
+        public static EnvironmentGateResult Block(MonitorSnapshot snapshot)
+        {
+            return new EnvironmentGateResult(false, snapshot, null);
+        }
+    }
+
+    internal sealed class EnvironmentInfo
+    {
+        public string Ip = "";
+        public string CountryCode = "";
+        public string CountryName = "";
+        public string Region = "";
+        public string City = "";
+        public string LocalizedCountryName = "";
+        public string LocalizedRegion = "";
+        public string LocalizedCity = "";
+
+        public bool IsHighRiskCountry()
+        {
+            return string.Equals(this.CountryCode, "CN", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(this.CountryCode, "HK", StringComparison.OrdinalIgnoreCase)
+                || ContainsIgnoreCase(this.CountryName, "China")
+                || ContainsIgnoreCase(this.CountryName, "Hong Kong");
+        }
+
+        public string DisplayText()
+        {
+            var text = "IP: " + EmptyAsDash(this.Ip);
+            if (!this.HasUsableNetworkAddress())
+            {
+                return text + "\r\n" + T.Text("env_info_unavailable");
+            }
+            text += "\r\n" + T.Text("env_location_label") + ": " + EmptyAsDash(this.EnglishLocation());
+            if (T.IsChinese)
+            {
+                var chinese = this.ChineseLocation();
+                if (!string.IsNullOrWhiteSpace(chinese)) text += "\r\n" + chinese;
+            }
+            return text;
+        }
+
+        public bool HasUsableNetworkAddress()
+        {
+            return !string.IsNullOrWhiteSpace(this.Ip)
+                && (!string.IsNullOrWhiteSpace(this.CountryName) || !string.IsNullOrWhiteSpace(this.CountryCode) || !string.IsNullOrWhiteSpace(this.Region) || !string.IsNullOrWhiteSpace(this.City));
+        }
+
+        public string EnglishLocation()
+        {
+            var location = string.Join(", ", new[] { this.City, this.Region, this.CountryName }.WhereNotBlank());
+            return string.IsNullOrWhiteSpace(location) ? this.CountryCode : location;
+        }
+
+        public string ChineseLocation()
+        {
+            var parts = new List<string>();
+            AddDistinct(parts, FirstNotBlank(this.LocalizedCity, ChineseCityName(this.CountryCode, this.City)));
+            AddDistinct(parts, FirstNotBlank(this.LocalizedRegion, ChineseRegionName(this.CountryCode, this.Region)));
+            AddDistinct(parts, FirstNotBlank(this.LocalizedCountryName, ChineseCountryName(this.CountryCode, this.CountryName)));
+            return string.Join("，", parts.ToArray());
+        }
+
+        private static string FirstNotBlank(params string[] values)
+        {
+            if (values == null) return "";
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+            }
+            return "";
+        }
+
+        private static bool ContainsIgnoreCase(string value, string fragment)
+        {
+            return value != null && value.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string EmptyAsDash(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "--" : value.Trim();
+        }
+
+        private static void AddDistinct(List<string> parts, string value)
+        {
+            value = (value ?? "").Trim();
+            if (value.Length == 0) return;
+            foreach (var part in parts)
+            {
+                if (string.Equals(part, value, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            parts.Add(value);
+        }
+
+        private static string ChineseCountryName(string countryCode, string fallback)
+        {
+            switch ((countryCode ?? "").Trim().ToUpperInvariant())
+            {
+                case "US": return "美国";
+                case "CN": return "中国";
+                case "HK": return "中国香港";
+                case "TW": return "中国台湾";
+                case "JP": return "日本";
+                case "SG": return "新加坡";
+                case "MY": return "马来西亚";
+                case "KR": return "韩国";
+                case "GB": return "英国";
+                case "CA": return "加拿大";
+                case "AU": return "澳大利亚";
+                case "DE": return "德国";
+                case "FR": return "法国";
+                case "NL": return "荷兰";
+                case "SE": return "瑞典";
+                case "CH": return "瑞士";
+                case "IN": return "印度";
+                case "BR": return "巴西";
+                default: return fallback;
+            }
+        }
+
+        private static string ChineseRegionName(string countryCode, string fallback)
+        {
+            var value = (fallback ?? "").Trim();
+            if (value.Length == 0) return "";
+            if (string.Equals(countryCode, "US", StringComparison.OrdinalIgnoreCase))
+            {
+                switch (value.ToLowerInvariant())
+                {
+                    case "california": return "加利福尼亚州";
+                    case "new york": return "纽约州";
+                    case "washington": return "华盛顿州";
+                    case "oregon": return "俄勒冈州";
+                    case "virginia": return "弗吉尼亚州";
+                    case "texas": return "得克萨斯州";
+                    case "illinois": return "伊利诺伊州";
+                    case "arizona": return "亚利桑那州";
+                    case "florida": return "佛罗里达州";
+                    case "georgia": return "佐治亚州";
+                    case "new jersey": return "新泽西州";
+                    case "massachusetts": return "马萨诸塞州";
+                    case "nevada": return "内华达州";
+                }
+            }
+            if (string.Equals(countryCode, "CN", StringComparison.OrdinalIgnoreCase))
+            {
+                switch (value.ToLowerInvariant())
+                {
+                    case "guangdong": return "广东";
+                    case "beijing": return "北京";
+                    case "shanghai": return "上海";
+                    case "zhejiang": return "浙江";
+                    case "jiangsu": return "江苏";
+                    case "sichuan": return "四川";
+                    case "fujian": return "福建";
+                    case "hubei": return "湖北";
+                    case "hunan": return "湖南";
+                    case "henan": return "河南";
+                    case "shandong": return "山东";
+                    case "hebei": return "河北";
+                    case "liaoning": return "辽宁";
+                    case "tianjin": return "天津";
+                    case "chongqing": return "重庆";
+                }
+            }
+            if (string.Equals(countryCode, "MY", StringComparison.OrdinalIgnoreCase))
+            {
+                switch (value.ToLowerInvariant())
+                {
+                    case "johor": return "柔佛州";
+                    case "kuala lumpur": return "吉隆坡";
+                    case "selangor": return "雪兰莪州";
+                    case "penang": return "槟城州";
+                    case "perak": return "霹雳州";
+                    case "sabah": return "沙巴州";
+                    case "sarawak": return "砂拉越州";
+                    case "malacca": return "马六甲州";
+                    case "melaka": return "马六甲州";
+                }
+            }
+            return value;
+        }
+
+        private static string ChineseCityName(string countryCode, string fallback)
+        {
+            var value = (fallback ?? "").Trim();
+            if (value.Length == 0) return "";
+            switch (value.ToLowerInvariant())
+            {
+                case "san jose": return "圣何塞";
+                case "san francisco": return "旧金山";
+                case "los angeles": return "洛杉矶";
+                case "seattle": return "西雅图";
+                case "new york": return "纽约";
+                case "chicago": return "芝加哥";
+                case "dallas": return "达拉斯";
+                case "ashburn": return "阿什本";
+                case "phoenix": return "凤凰城";
+                case "portland": return "波特兰";
+                case "shenzhen": return "深圳";
+                case "guangzhou": return "广州";
+                case "beijing": return "北京";
+                case "shanghai": return "上海";
+                case "hangzhou": return "杭州";
+                case "nanjing": return "南京";
+                case "chengdu": return "成都";
+                case "wuhan": return "武汉";
+                case "tokyo": return "东京";
+                case "osaka": return "大阪";
+                case "singapore": return "新加坡";
+                case "hong kong": return "香港";
+                case "bukit batu": return "武吉峇都";
+                case "kuala lumpur": return "吉隆坡";
+                case "johor bahru": return "新山";
+                case "malacca": return "马六甲";
+                case "melaka": return "马六甲";
+                default: return value;
+            }
+        }
+    }
+
+    internal sealed class TrustedEnvironment
+    {
+        public string Ip = "";
+        public string CountryCode = "";
+        public string CountryName = "";
+        public string Region = "";
+        public string City = "";
+        public string LocalizedCountryName = "";
+        public string LocalizedRegion = "";
+        public string LocalizedCity = "";
+        public string ConfirmedAt = "";
+
+        public static TrustedEnvironment FromInfo(EnvironmentInfo info)
+        {
+            if (info == null) return new TrustedEnvironment();
+            return new TrustedEnvironment {
+                Ip = info.Ip ?? "",
+                CountryCode = info.CountryCode ?? "",
+                CountryName = info.CountryName ?? "",
+                Region = info.Region ?? "",
+                City = info.City ?? "",
+                LocalizedCountryName = info.LocalizedCountryName ?? "",
+                LocalizedRegion = info.LocalizedRegion ?? "",
+                LocalizedCity = info.LocalizedCity ?? "",
+                ConfirmedAt = DateTime.Now.ToString("o", CultureInfo.InvariantCulture)
+            };
+        }
+
+        public TrustedEnvironment Clone()
+        {
+            return new TrustedEnvironment {
+                Ip = this.Ip ?? "",
+                CountryCode = this.CountryCode ?? "",
+                CountryName = this.CountryName ?? "",
+                Region = this.Region ?? "",
+                City = this.City ?? "",
+                LocalizedCountryName = this.LocalizedCountryName ?? "",
+                LocalizedRegion = this.LocalizedRegion ?? "",
+                LocalizedCity = this.LocalizedCity ?? "",
+                ConfirmedAt = this.ConfirmedAt ?? ""
+            };
+        }
+
+        public EnvironmentInfo ToInfo()
+        {
+            return new EnvironmentInfo {
+                Ip = this.Ip ?? "",
+                CountryCode = this.CountryCode ?? "",
+                CountryName = this.CountryName ?? "",
+                Region = this.Region ?? "",
+                City = this.City ?? "",
+                LocalizedCountryName = this.LocalizedCountryName ?? "",
+                LocalizedRegion = this.LocalizedRegion ?? "",
+                LocalizedCity = this.LocalizedCity ?? ""
+            };
+        }
+
+        public bool Matches(EnvironmentInfo info)
+        {
+            if (info == null) return false;
+            return Same(this.Ip, info.Ip)
+                && Same(this.CountryCode, info.CountryCode)
+                && Same(this.Region, info.Region)
+                && Same(this.City, info.City);
+        }
+
+        public void UpdateFrom(EnvironmentInfo info)
+        {
+            var next = FromInfo(info);
+            this.Ip = next.Ip;
+            this.CountryCode = next.CountryCode;
+            this.CountryName = next.CountryName;
+            this.Region = next.Region;
+            this.City = next.City;
+            this.LocalizedCountryName = next.LocalizedCountryName;
+            this.LocalizedRegion = next.LocalizedRegion;
+            this.LocalizedCity = next.LocalizedCity;
+            this.ConfirmedAt = next.ConfirmedAt;
+        }
+
+        public string ConfirmedAtText()
+        {
+            DateTime parsed;
+            if (DateTime.TryParse(this.ConfirmedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out parsed))
+            {
+                return parsed.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+            }
+            return string.IsNullOrWhiteSpace(this.ConfirmedAt) ? "--" : this.ConfirmedAt;
+        }
+
+        private static bool Same(string a, string b)
+        {
+            return string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    internal static class EnvironmentSafetyClient
+    {
+        private const string Endpoint = "https://ipapi.co/json/";
+        private const string ChineseLocationEndpoint = "http://ip-api.com/json/";
+
+        public static EnvironmentInfo Fetch()
+        {
+            var root = ReadJson(Endpoint);
+            var info = new EnvironmentInfo {
+                Ip = GetString(root, "ip"),
+                CountryCode = GetString(root, "country_code"),
+                CountryName = GetString(root, "country_name"),
+                Region = GetString(root, "region"),
+                City = GetString(root, "city")
+            };
+            if (T.IsChinese) TryFetchChineseLocation(info);
+            return info;
+        }
+
+        private static Dictionary<string, object> ReadJson(string endpoint)
+        {
+            var request = (HttpWebRequest)WebRequest.Create(endpoint);
+            request.Method = "GET";
+            request.Accept = "application/json";
+            request.UserAgent = "CodexFloat/1.0";
+            request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
+            request.KeepAlive = false;
+            using (var response = (HttpWebResponse)request.GetResponse())
+            using (var stream = response.GetResponseStream())
+            using (var reader = new StreamReader(stream, Encoding.UTF8))
+            {
+                var json = reader.ReadToEnd();
+                var root = new JavaScriptSerializer().DeserializeObject(json) as Dictionary<string, object>;
+                if (root == null) throw new InvalidOperationException("Environment API returned an unreadable response.");
+                return root;
+            }
+        }
+
+        private static void TryFetchChineseLocation(EnvironmentInfo info)
+        {
+            if (info == null || !info.HasUsableNetworkAddress()) return;
+            try
+            {
+                var query = string.IsNullOrWhiteSpace(info.Ip) ? "" : Uri.EscapeDataString(info.Ip.Trim());
+                var endpoint = ChineseLocationEndpoint + query + "?fields=status,message,query,country,countryCode,regionName,city&lang=zh-CN";
+                var root = ReadJson(endpoint);
+                var status = GetString(root, "status");
+                if (!string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)) return;
+
+                var localizedCountryCode = GetString(root, "countryCode");
+                if (!string.IsNullOrWhiteSpace(localizedCountryCode)
+                    && !string.IsNullOrWhiteSpace(info.CountryCode)
+                    && !string.Equals(localizedCountryCode, info.CountryCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                info.LocalizedCountryName = GetString(root, "country");
+                info.LocalizedRegion = GetString(root, "regionName");
+                info.LocalizedCity = GetString(root, "city");
+            }
+            catch
+            {
+                // Localization is display-only; keep the primary environment result if this public API is unavailable.
+            }
+        }
+
+        private static string GetString(Dictionary<string, object> root, string key)
+        {
+            object value;
+            if (!root.TryGetValue(key, out value) || value == null) return "";
+            return Convert.ToString(value, CultureInfo.InvariantCulture).Trim();
+        }
+    }
+
+    internal static class StringEnumerableExtensions
+    {
+        public static IEnumerable<string> WhereNotBlank(this IEnumerable<string> values)
+        {
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value)) yield return value.Trim();
+            }
+        }
+    }
+
+    internal static class EnvironmentRiskVisual
+    {
+        public static Color Accent(EnvironmentRiskLevel level)
+        {
+            switch (level)
+            {
+                case EnvironmentRiskLevel.Safe: return Color.FromArgb(22, 163, 74);
+                case EnvironmentRiskLevel.High: return Color.FromArgb(220, 38, 38);
+                default: return Color.FromArgb(217, 119, 6);
+            }
+        }
+
+        public static Color Soft(EnvironmentRiskLevel level)
+        {
+            switch (level)
+            {
+                case EnvironmentRiskLevel.Safe: return Color.FromArgb(232, 248, 239);
+                case EnvironmentRiskLevel.High: return Color.FromArgb(254, 232, 232);
+                default: return Color.FromArgb(255, 246, 224);
+            }
+        }
+
+        public static string Badge(EnvironmentRiskLevel level)
+        {
+            switch (level)
+            {
+                case EnvironmentRiskLevel.Safe: return T.Text("env_badge_safe");
+                case EnvironmentRiskLevel.High: return T.Text("env_badge_high");
+                default: return T.Text("env_badge_medium");
+            }
+        }
+    }
+
+    internal sealed class EnvironmentStatusPopupForm : Form
+    {
+        private readonly EnvironmentRiskLevel riskLevel;
+        private readonly string title;
+        private readonly string bodyText;
+        private readonly EnvironmentInfo info;
+        private readonly WinFormsTimer closeTimer = new WinFormsTimer();
+        private readonly Button confirmButton = new Button();
+        private int secondsRemaining;
+
+        public EnvironmentStatusPopupForm(EnvironmentRiskLevel riskLevel, string title, string message, EnvironmentInfo info)
+        {
+            this.riskLevel = riskLevel;
+            this.title = title ?? "";
+            this.bodyText = message ?? "";
+            this.info = info;
+            this.secondsRemaining = riskLevel == EnvironmentRiskLevel.High ? 9 : 6;
+            this.Size = new Size(440, 286);
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.Manual;
+            this.ShowInTaskbar = false;
+            this.TopMost = true;
+            this.DoubleBuffered = true;
+            this.BackColor = Color.White;
+            this.closeTimer.Interval = 1000;
+            this.closeTimer.Tick += delegate {
+                this.secondsRemaining--;
+                this.UpdateConfirmButtonText();
+                if (this.secondsRemaining <= 0)
+                {
+                    this.closeTimer.Stop();
+                    if (!this.IsDisposed) this.Close();
+                }
+            };
+            ConfigureConfirmButton(this.confirmButton);
+            this.confirmButton.Click += delegate { this.Close(); };
+            this.Controls.Add(this.confirmButton);
+            this.UpdateConfirmButtonText();
+        }
+
+        public void PlaceBottomRight(Rectangle workingArea)
+        {
+            this.Location = new Point(workingArea.Right - this.Width - 18, workingArea.Bottom - this.Height - 18);
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            this.closeTimer.Start();
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            this.closeTimer.Stop();
+            this.closeTimer.Dispose();
+            base.OnClosed(e);
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            this.Close();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (this.Width <= 0 || this.Height <= 0) return;
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width, this.Height), 14))
+            {
+                this.Region = new Region(path);
+            }
+            this.confirmButton.Bounds = new Rectangle((this.ClientSize.Width - 156) / 2, this.ClientSize.Height - 50, 156, 34);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var accent = EnvironmentRiskVisual.Accent(this.riskLevel);
+            using (var bg = new SolidBrush(Color.FromArgb(250, 252, 255)))
+            using (var border = new Pen(Color.FromArgb(214, 226, 238)))
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width - 1, this.Height - 1), 14))
+            {
+                g.FillPath(bg, path);
+                g.DrawPath(border, path);
+            }
+            using (var accentBrush = new SolidBrush(accent))
+            {
+                g.FillRectangle(accentBrush, 0, 0, 7, this.Height);
+                g.FillEllipse(accentBrush, 23, 25, 14, 14);
+            }
+            DrawBadge(g, new Rectangle(this.Width - 96, 20, 70, 26), this.riskLevel);
+            using (var titleFont = UiFont(10.8f, FontStyle.Bold))
+            using (var bodyFont = UiFont(9.4f, FontStyle.Regular))
+            {
+                TextRenderer.DrawText(g, this.title, titleFont, new Rectangle(48, 17, this.Width - 156, 30), Color.FromArgb(15, 23, 42), TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
+                var bodyRect = new Rectangle(28, 66, this.Width - 56, 72);
+                var bodyHeight = MeasureWrappedTextHeight(this.bodyText, bodyFont, bodyRect.Width, bodyRect.Height);
+                TextRenderer.DrawText(g, this.bodyText, bodyFont, new Rectangle(bodyRect.Left, bodyRect.Top, bodyRect.Width, bodyHeight + 4), Color.FromArgb(51, 65, 85), TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+
+                var statusInfoHeight = 82;
+                var statusInfoTop = CenteredTopBetween(bodyRect.Top + bodyHeight, this.confirmButton.Top, statusInfoHeight, 8);
+                DrawEnvironmentInfoBlock(g, new Rectangle(28, statusInfoTop, this.Width - 56, statusInfoHeight), this.info, this.riskLevel, Color.FromArgb(39, 54, 72));
+            }
+        }
+
+        internal static void DrawBadge(Graphics g, Rectangle bounds, EnvironmentRiskLevel level)
+        {
+            var accent = EnvironmentRiskVisual.Accent(level);
+            using (var path = MiniBarForm.RoundRect(bounds, 13))
+            using (var fill = new SolidBrush(EnvironmentRiskVisual.Soft(level)))
+            using (var border = new Pen(Color.FromArgb(150, accent)))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+            using (var badgeFont = UiFont(8.6f, FontStyle.Bold))
+            {
+                TextRenderer.DrawText(g, EnvironmentRiskVisual.Badge(level), badgeFont, bounds, accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            }
+        }
+
+        private void UpdateConfirmButtonText()
+        {
+            this.confirmButton.Text = T.Text("env_popup_confirm") + " (" + Math.Max(0, this.secondsRemaining).ToString(CultureInfo.InvariantCulture) + "s)";
+        }
+
+        internal static void DrawEnvironmentInfoBlock(Graphics g, Rectangle infoRect, EnvironmentInfo info, EnvironmentRiskLevel level, Color textColor)
+        {
+            var accent = EnvironmentRiskVisual.Accent(level);
+            using (var path = MiniBarForm.RoundRect(infoRect, 9))
+            using (var fill = new SolidBrush(EnvironmentRiskVisual.Soft(level)))
+            using (var pen = new Pen(Color.FromArgb(120, accent)))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(pen, path);
+            }
+
+            var labelFont = UiFont(9.2f, FontStyle.Bold);
+            var valueFont = UiFont(9.2f, FontStyle.Regular);
+            var labelColor = Color.FromArgb(88, textColor);
+            var left = infoRect.Left + 12;
+            var labelWidth = T.IsChinese ? 54 : 68;
+            var valueLeft = left + labelWidth;
+            var lineHeight = 20;
+            var lineGap = 4;
+
+            if (info == null || !info.HasUsableNetworkAddress())
+            {
+                var contentHeight = lineHeight * 2 + lineGap;
+                var emptyTop = infoRect.Top + Math.Max(0, (infoRect.Height - contentHeight) / 2);
+                TextRenderer.DrawText(g, "IP:", labelFont, new Rectangle(left, emptyTop, labelWidth, lineHeight), labelColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(g, "--", valueFont, new Rectangle(valueLeft, emptyTop, infoRect.Right - valueLeft - 12, lineHeight), textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                using (var explainFont = UiFont(9.2f, FontStyle.Regular))
+                {
+                    TextRenderer.DrawText(g, T.Text("env_info_unavailable"), explainFont, new Rectangle(valueLeft, emptyTop + lineHeight + lineGap, infoRect.Right - valueLeft - 12, lineHeight), textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                }
+                labelFont.Dispose();
+                valueFont.Dispose();
+                return;
+            }
+
+            var chinese = T.IsChinese ? info.ChineseLocation() : "";
+            var lineCount = T.IsChinese && !string.IsNullOrWhiteSpace(chinese) ? 3 : 2;
+            var totalHeight = lineHeight * lineCount + lineGap * (lineCount - 1);
+            var top = infoRect.Top + Math.Max(0, (infoRect.Height - totalHeight) / 2);
+            TextRenderer.DrawText(g, "IP:", labelFont, new Rectangle(left, top, labelWidth, lineHeight), labelColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(g, info.Ip, valueFont, new Rectangle(valueLeft, top, infoRect.Right - valueLeft - 12, lineHeight), textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+            var locationTop = top + lineHeight + lineGap;
+            TextRenderer.DrawText(g, T.Text("env_location_label") + ":", labelFont, new Rectangle(left, locationTop, labelWidth, lineHeight), labelColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(g, info.EnglishLocation(), valueFont, new Rectangle(valueLeft, locationTop, infoRect.Right - valueLeft - 12, lineHeight), textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            if (T.IsChinese && !string.IsNullOrWhiteSpace(chinese))
+            {
+                TextRenderer.DrawText(g, chinese, valueFont, new Rectangle(valueLeft, locationTop + lineHeight + lineGap, infoRect.Right - valueLeft - 12, lineHeight), textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            }
+            labelFont.Dispose();
+            valueFont.Dispose();
+        }
+
+        internal static int MeasureWrappedTextHeight(string text, Font font, int width, int maxHeight)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return 0;
+            var measured = TextRenderer.MeasureText(text, font, new Size(Math.Max(1, width), 1000), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            return Math.Max(18, Math.Min(maxHeight, measured.Height));
+        }
+
+        internal static int CenteredTopBetween(int upperContentBottom, int lowerContentTop, int blockHeight, int margin)
+        {
+            var start = upperContentBottom + margin;
+            var end = lowerContentTop - margin;
+            if (end <= start + blockHeight) return start;
+            return start + (end - start - blockHeight) / 2;
+        }
+
+        internal static Font UiFont(float size, FontStyle style)
+        {
+            return new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", size, style);
+        }
+
+        private static void ConfigureConfirmButton(Button button)
+        {
+            button.Font = UiFont(9.0f, FontStyle.Regular);
+            button.TextAlign = ContentAlignment.MiddleCenter;
+            button.UseCompatibleTextRendering = false;
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            button.BackColor = Color.White;
+            button.ForeColor = Color.FromArgb(30, 41, 59);
+            button.UseVisualStyleBackColor = false;
+        }
+    }
+
+    internal sealed class EnvironmentInitialTrustPromptForm : Form
+    {
+        public EnvironmentPromptChoice Choice = EnvironmentPromptChoice.Wait;
+        private readonly EnvironmentInfo info;
+        private readonly Button trustButton = new Button();
+        private readonly Button waitButton = new Button();
+
+        public EnvironmentInitialTrustPromptForm(EnvironmentInfo info)
+        {
+            this.info = info;
+            this.Text = T.Text("env_safety_title");
+            this.Size = new Size(600, 338);
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.Manual;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.TopMost = true;
+            this.ShowInTaskbar = false;
+            this.BackColor = Color.White;
+            this.DoubleBuffered = true;
+
+            ConfigureButton(this.trustButton, T.Text("env_initial_trust_continue"), EnvironmentRiskVisual.Accent(EnvironmentRiskLevel.Safe), Color.White, EnvironmentRiskVisual.Accent(EnvironmentRiskLevel.Safe));
+            this.trustButton.Click += delegate {
+                this.Choice = EnvironmentPromptChoice.Continue;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            };
+
+            ConfigureButton(this.waitButton, T.Text("env_initial_trust_wait"), Color.White, Color.FromArgb(51, 65, 85), Color.FromArgb(203, 213, 225));
+            this.waitButton.Click += delegate {
+                this.Choice = EnvironmentPromptChoice.Wait;
+                this.DialogResult = DialogResult.Cancel;
+                this.Close();
+            };
+            this.Controls.Add(this.trustButton);
+            this.Controls.Add(this.waitButton);
+
+            this.AcceptButton = this.trustButton;
+            this.CancelButton = this.waitButton;
+        }
+
+        public void PlaceBottomRight(Rectangle workingArea)
+        {
+            this.Location = new Point(workingArea.Right - this.Width - 18, workingArea.Bottom - this.Height - 18);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (this.Width <= 0 || this.Height <= 0) return;
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width, this.Height), 16))
+            {
+                this.Region = new Region(path);
+            }
+
+            const int buttonWidth = 238;
+            const int buttonHeight = 50;
+            const int gap = 16;
+            var total = buttonWidth * 2 + gap;
+            var x = (this.ClientSize.Width - total) / 2;
+            var y = this.ClientSize.Height - 76;
+            this.trustButton.Bounds = new Rectangle(x, y, buttonWidth, buttonHeight);
+            this.waitButton.Bounds = new Rectangle(x + buttonWidth + gap, y, buttonWidth, buttonHeight);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var accent = EnvironmentRiskVisual.Accent(EnvironmentRiskLevel.Safe);
+            using (var bg = new SolidBrush(Color.FromArgb(250, 252, 255)))
+            using (var border = new Pen(Color.FromArgb(213, 225, 236)))
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width - 1, this.Height - 1), 16))
+            {
+                g.FillPath(bg, path);
+                g.DrawPath(border, path);
+            }
+            using (var accentBrush = new SolidBrush(accent))
+            {
+                g.FillRectangle(accentBrush, 0, 0, 8, this.Height);
+                g.FillEllipse(accentBrush, 26, 29, 16, 16);
+            }
+            EnvironmentStatusPopupForm.DrawBadge(g, new Rectangle(this.Width - 110, 24, 78, 28), EnvironmentRiskLevel.Safe);
+            using (var titleFont = EnvironmentStatusPopupForm.UiFont(10.8f, FontStyle.Bold))
+            using (var bodyFont = EnvironmentStatusPopupForm.UiFont(9.4f, FontStyle.Regular))
+            {
+                TextRenderer.DrawText(g, T.Text("env_initial_trust_title"), titleFont, new Rectangle(54, 19, this.Width - 180, 38), Color.FromArgb(15, 23, 42), TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
+                var bodyRect = new Rectangle(28, 72, this.Width - 56, 78);
+                var bodyText = T.Text("env_initial_trust_message");
+                var bodyHeight = EnvironmentStatusPopupForm.MeasureWrappedTextHeight(bodyText, bodyFont, bodyRect.Width, bodyRect.Height);
+                TextRenderer.DrawText(g, bodyText, bodyFont, new Rectangle(bodyRect.Left, bodyRect.Top, bodyRect.Width, bodyHeight + 4), Color.FromArgb(51, 65, 85), TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+
+                var promptInfoHeight = 90;
+                var promptInfoTop = EnvironmentStatusPopupForm.CenteredTopBetween(bodyRect.Top + bodyHeight, this.trustButton.Top, promptInfoHeight, 10);
+                EnvironmentStatusPopupForm.DrawEnvironmentInfoBlock(g, new Rectangle(28, promptInfoTop, this.Width - 56, promptInfoHeight), this.info, EnvironmentRiskLevel.Safe, Color.FromArgb(20, 83, 45));
+            }
+        }
+
+        private static void ConfigureButton(Button button, string text, Color backColor, Color foreColor, Color borderColor)
+        {
+            button.Text = text;
+            button.Font = EnvironmentStatusPopupForm.UiFont(9.0f, FontStyle.Regular);
+            button.TextAlign = ContentAlignment.MiddleCenter;
+            button.UseCompatibleTextRendering = false;
+            button.Padding = new Padding(6, 0, 6, 1);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = borderColor;
+            button.BackColor = backColor;
+            button.ForeColor = foreColor;
+            button.UseVisualStyleBackColor = false;
+        }
+    }
+
+    internal sealed class EnvironmentRiskPromptForm : Form
+    {
+        public EnvironmentPromptChoice Choice = EnvironmentPromptChoice.Wait;
+        private readonly EnvironmentInfo info;
+        private readonly string message;
+        private readonly Button continueButton = new Button();
+        private readonly Button waitButton = new Button();
+
+        public EnvironmentRiskPromptForm(EnvironmentInfo info, string message)
+        {
+            this.info = info;
+            this.message = message ?? "";
+            this.Text = T.Text("env_safety_title");
+            this.Size = new Size(600, 348);
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.Manual;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.TopMost = true;
+            this.ShowInTaskbar = false;
+            this.BackColor = Color.White;
+            this.DoubleBuffered = true;
+
+            ConfigureButton(this.continueButton, T.Text("env_confirm_continue"), EnvironmentRiskVisual.Accent(EnvironmentRiskLevel.Medium), Color.White, EnvironmentRiskVisual.Accent(EnvironmentRiskLevel.Medium));
+            this.continueButton.Click += delegate {
+                this.Choice = EnvironmentPromptChoice.Continue;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            };
+
+            ConfigureButton(this.waitButton, T.Text("env_wait_manual"), Color.White, Color.FromArgb(51, 65, 85), Color.FromArgb(203, 213, 225));
+            this.waitButton.Click += delegate {
+                this.Choice = EnvironmentPromptChoice.Wait;
+                this.DialogResult = DialogResult.Cancel;
+                this.Close();
+            };
+            this.Controls.Add(this.continueButton);
+            this.Controls.Add(this.waitButton);
+
+            this.AcceptButton = this.continueButton;
+            this.CancelButton = this.waitButton;
+        }
+
+        public void PlaceBottomRight(Rectangle workingArea)
+        {
+            this.Location = new Point(workingArea.Right - this.Width - 18, workingArea.Bottom - this.Height - 18);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (this.Width <= 0 || this.Height <= 0) return;
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width, this.Height), 16))
+            {
+                this.Region = new Region(path);
+            }
+
+            const int buttonWidth = 238;
+            const int buttonHeight = 50;
+            const int gap = 16;
+            var total = buttonWidth * 2 + gap;
+            var x = (this.ClientSize.Width - total) / 2;
+            var y = this.ClientSize.Height - 76;
+            this.continueButton.Bounds = new Rectangle(x, y, buttonWidth, buttonHeight);
+            this.waitButton.Bounds = new Rectangle(x + buttonWidth + gap, y, buttonWidth, buttonHeight);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var accent = EnvironmentRiskVisual.Accent(EnvironmentRiskLevel.Medium);
+            using (var bg = new SolidBrush(Color.FromArgb(250, 252, 255)))
+            using (var border = new Pen(Color.FromArgb(213, 225, 236)))
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width - 1, this.Height - 1), 16))
+            {
+                g.FillPath(bg, path);
+                g.DrawPath(border, path);
+            }
+            using (var accentBrush = new SolidBrush(accent))
+            {
+                g.FillRectangle(accentBrush, 0, 0, 8, this.Height);
+                g.FillEllipse(accentBrush, 26, 29, 16, 16);
+            }
+            EnvironmentStatusPopupForm.DrawBadge(g, new Rectangle(this.Width - 110, 24, 78, 28), EnvironmentRiskLevel.Medium);
+            using (var titleFont = EnvironmentStatusPopupForm.UiFont(10.8f, FontStyle.Bold))
+            using (var bodyFont = EnvironmentStatusPopupForm.UiFont(9.4f, FontStyle.Regular))
+            {
+                TextRenderer.DrawText(g, T.Text("env_medium_risk_title"), titleFont, new Rectangle(54, 19, this.Width - 180, 38), Color.FromArgb(15, 23, 42), TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
+                var bodyRect = new Rectangle(28, 74, this.Width - 56, 82);
+                var bodyHeight = EnvironmentStatusPopupForm.MeasureWrappedTextHeight(this.message, bodyFont, bodyRect.Width, bodyRect.Height);
+                TextRenderer.DrawText(g, this.message, bodyFont, new Rectangle(bodyRect.Left, bodyRect.Top, bodyRect.Width, bodyHeight + 4), Color.FromArgb(51, 65, 85), TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+
+                var promptInfoHeight = 90;
+                var promptInfoTop = EnvironmentStatusPopupForm.CenteredTopBetween(bodyRect.Top + bodyHeight, this.continueButton.Top, promptInfoHeight, 10);
+                EnvironmentStatusPopupForm.DrawEnvironmentInfoBlock(g, new Rectangle(28, promptInfoTop, this.Width - 56, promptInfoHeight), this.info, EnvironmentRiskLevel.Medium, Color.FromArgb(92, 62, 10));
+            }
+        }
+
+        private static void ConfigureButton(Button button, string text, Color backColor, Color foreColor, Color borderColor)
+        {
+            button.Text = text;
+            button.Font = EnvironmentStatusPopupForm.UiFont(9.0f, FontStyle.Regular);
+            button.TextAlign = ContentAlignment.MiddleCenter;
+            button.UseCompatibleTextRendering = false;
+            button.Padding = new Padding(6, 0, 6, 1);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = borderColor;
+            button.BackColor = backColor;
+            button.ForeColor = foreColor;
+            button.UseVisualStyleBackColor = false;
         }
     }
 
@@ -1810,6 +3134,7 @@ namespace CodexFloat
         public event EventHandler<PointEventArgs> LocationSaved;
         public event EventHandler RefreshRequested;
         public event EventHandler SettingsRequested;
+        public event EventHandler TrustedEnvironmentsRequested;
         public event EventHandler ResetPositionRequested;
         public event EventHandler HelpRequested;
         public event EventHandler ErrorLogRequested;
@@ -1931,6 +3256,9 @@ namespace CodexFloat
             this.behaviorConfig.ScrollShowGpt55High = cfg.ScrollShowGpt55High;
             this.behaviorConfig.ScrollShowGpt55Medium = cfg.ScrollShowGpt55Medium;
             this.behaviorConfig.ScrollShowGpt54XHigh = cfg.ScrollShowGpt54XHigh;
+            this.behaviorConfig.EnvironmentCheckOnStartup = cfg.EnvironmentCheckOnStartup;
+            this.behaviorConfig.EnvironmentConfirmMediumRiskOnManualRefresh = cfg.EnvironmentConfirmMediumRiskOnManualRefresh;
+            this.behaviorConfig.EnvironmentRecheckHighRiskOnManualRefresh = cfg.EnvironmentRecheckHighRiskOnManualRefresh;
             this.TopMost = cfg.AlwaysOnTop;
             this.Opacity = 1.0;
             this.layerOpacity = (byte)Math.Max(89, Math.Min(255, (int)Math.Round(255.0 * Math.Max(35, Math.Min(100, cfg.OpacityPercent)) / 100.0)));
@@ -2123,6 +3451,7 @@ namespace CodexFloat
             menu.Items.Add(T.Text("刷新"), null, delegate { Raise(this.RefreshRequested); });
             menu.Items.Add(this.BuildAppearanceMenu());
             menu.Items.Add(this.BuildBehaviorMenu());
+            menu.Items.Add(this.BuildEnvironmentSafetyMenu());
             menu.Items.Add(this.BuildScrollDataMenu());
             menu.Items.Add(this.BuildLanguageMenu());
             menu.Items.Add(T.Text("设置"), null, delegate { Raise(this.SettingsRequested); });
@@ -2153,17 +3482,42 @@ namespace CodexFloat
             return root;
         }
 
+        private ToolStripMenuItem BuildEnvironmentSafetyMenu()
+        {
+            var root = new ToolStripMenuItem(T.Text("env_safety_title"));
+            root.DropDownItems.Add(new ToolStripMenuItem(T.Text("env_check_on_startup")));
+            root.DropDownOpening += delegate {
+                root.DropDownItems.Clear();
+                root.DropDownItems.Add(this.BuildEnvironmentToggle(T.Text("env_check_on_startup"), "startup", this.behaviorConfig.EnvironmentCheckOnStartup));
+                root.DropDownItems.Add(this.BuildEnvironmentToggle(T.Text("env_confirm_medium_on_manual"), "medium", this.behaviorConfig.EnvironmentConfirmMediumRiskOnManualRefresh));
+                root.DropDownItems.Add(this.BuildEnvironmentToggle(T.Text("env_recheck_high_on_manual"), "high", this.behaviorConfig.EnvironmentRecheckHighRiskOnManualRefresh));
+                root.DropDownItems.Add(new ToolStripSeparator());
+                root.DropDownItems.Add(T.Text("env_trusted_library"), null, delegate { Raise(this.TrustedEnvironmentsRequested); });
+                MenuDropDownPlacer.AttachChildren(root, this.CurrentScreenBounds);
+            };
+            return root;
+        }
+
+        private ToolStripMenuItem BuildEnvironmentToggle(string text, string key, bool isChecked)
+        {
+            var item = new ToolStripMenuItem(text);
+            item.Tag = key;
+            item.Checked = isChecked;
+            item.Click += delegate { this.ToggleEnvironmentSetting(key); };
+            return item;
+        }
+
         private ToolStripMenuItem BuildScrollDataMenu()
         {
             var root = new ToolStripMenuItem(T.Text("滚动数据"));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_5h"), "5h", this.behaviorConfig.ScrollShowFiveHour));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_weekly"), "weekly", this.behaviorConfig.ScrollShowWeekly));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_xhigh"), "gpt55xhigh", this.behaviorConfig.ScrollShowGpt55XHigh));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_high"), "gpt55high", this.behaviorConfig.ScrollShowGpt55High));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_medium"), "gpt55medium", this.behaviorConfig.ScrollShowGpt55Medium));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_54_xhigh"), "gpt54xhigh", this.behaviorConfig.ScrollShowGpt54XHigh));
             root.DropDownOpening += delegate {
-                root.DropDownItems.Clear();
-                root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_5h"), "5h", this.behaviorConfig.ScrollShowFiveHour));
-                root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_weekly"), "weekly", this.behaviorConfig.ScrollShowWeekly));
-                root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_xhigh"), "gpt55xhigh", this.behaviorConfig.ScrollShowGpt55XHigh));
-                root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_high"), "gpt55high", this.behaviorConfig.ScrollShowGpt55High));
-                root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_medium"), "gpt55medium", this.behaviorConfig.ScrollShowGpt55Medium));
-                root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_54_xhigh"), "gpt54xhigh", this.behaviorConfig.ScrollShowGpt54XHigh));
+                this.UpdateScrollMenuChecks(root);
                 MenuDropDownPlacer.AttachChildren(root, this.CurrentScreenBounds);
             };
             return root;
@@ -2172,9 +3526,27 @@ namespace CodexFloat
         private ToolStripMenuItem BuildScrollToggle(string text, string key, bool isChecked)
         {
             var item = new ToolStripMenuItem(text);
+            item.Tag = key;
             item.Checked = isChecked;
             item.Click += delegate { this.ToggleScrollSelection(key); };
             return item;
+        }
+
+        private void UpdateScrollMenuChecks(ToolStripMenuItem root)
+        {
+            foreach (ToolStripMenuItem item in root.DropDownItems)
+            {
+                var key = item.Tag as string;
+                switch (key)
+                {
+                    case "5h": item.Checked = this.behaviorConfig.ScrollShowFiveHour; break;
+                    case "weekly": item.Checked = this.behaviorConfig.ScrollShowWeekly; break;
+                    case "gpt55xhigh": item.Checked = this.behaviorConfig.ScrollShowGpt55XHigh; break;
+                    case "gpt55high": item.Checked = this.behaviorConfig.ScrollShowGpt55High; break;
+                    case "gpt55medium": item.Checked = this.behaviorConfig.ScrollShowGpt55Medium; break;
+                    case "gpt54xhigh": item.Checked = this.behaviorConfig.ScrollShowGpt54XHigh; break;
+                }
+            }
         }
 
         private ToolStripMenuItem BuildOpacityMenu()
@@ -2249,6 +3621,17 @@ namespace CodexFloat
             this.messageIndex = 0;
             this.RaiseBehaviorChanged();
             this.Invalidate();
+        }
+
+        private void ToggleEnvironmentSetting(string key)
+        {
+            switch (key)
+            {
+                case "startup": this.behaviorConfig.EnvironmentCheckOnStartup = !this.behaviorConfig.EnvironmentCheckOnStartup; break;
+                case "medium": this.behaviorConfig.EnvironmentConfirmMediumRiskOnManualRefresh = !this.behaviorConfig.EnvironmentConfirmMediumRiskOnManualRefresh; break;
+                case "high": this.behaviorConfig.EnvironmentRecheckHighRiskOnManualRefresh = !this.behaviorConfig.EnvironmentRecheckHighRiskOnManualRefresh; break;
+            }
+            this.RaiseBehaviorChanged();
         }
 
         private void RaiseBehaviorChanged()
@@ -2445,6 +3828,22 @@ namespace CodexFloat
             return items[this.messageIndex];
         }
 
+        private string MiniErrorText()
+        {
+            var code = this.snapshot == null ? "" : (this.snapshot.ErrorCode ?? "");
+            if (string.Equals(code, "ENV_HIGH_RISK", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(code, "ENV_MEDIUM_RISK_PENDING", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(code, "ENV_INITIAL_TRUST_PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                return T.Text("env_mini_risk");
+            }
+            if (string.Equals(code, "ENV_CHECK_FAILED", StringComparison.OrdinalIgnoreCase))
+            {
+                return T.Text("env_mini_check_failed");
+            }
+            return Trim(this.snapshot == null ? "" : this.snapshot.ErrorMessage, 10);
+        }
+
         private List<string> ScrollItems()
         {
             var items = new List<string>();
@@ -2495,7 +3894,7 @@ namespace CodexFloat
             if (this.snapshot.ErrorMessage != null)
             {
                 this.DrawCenteredText(g, "Codex", new Font("Segoe UI Semibold", 10f), this.theme.Muted, new RectangleF(0, 18, this.Width, 20));
-                this.DrawCenteredText(g, Trim(this.snapshot.ErrorMessage, 10), new Font("Segoe UI Semibold", 10.2f), this.theme.Text, new RectangleF(6, 37, this.Width - 12, 28));
+                this.DrawCenteredText(g, this.MiniErrorText(), new Font("Segoe UI Semibold", 10.2f), this.theme.Text, new RectangleF(6, 37, this.Width - 12, 28));
                 this.DrawCenteredText(g, T.Text("error_click_details"), new Font("Segoe UI", 8.2f), this.theme.Muted, new RectangleF(0, 64, this.Width, 18));
                 using (var errPen = new Pen(Color.FromArgb(235, 235, 86, 86), 6f))
                 {
@@ -2718,17 +4117,20 @@ namespace CodexFloat
 
             using (var accent = new SolidBrush(this.theme.Accent))
             using (var titleFont = new Font("Segoe UI Semibold", 12f))
-            using (var bodyFont = new Font("Segoe UI Semibold", 10f))
-            using (var smallFont = new Font("Segoe UI", 9f))
-            using (var text = new SolidBrush(this.theme.Text))
-            using (var muted = new SolidBrush(this.theme.Muted))
+            using (var topUpdateFont = new Font("Segoe UI", 9f))
+            using (var bodyFont = new Font("Segoe UI Semibold", 11.2f))
+            using (var smallFont = new Font("Segoe UI Semibold", 9.8f))
+            using (var titleTextBrush = new SolidBrush(this.theme.Text))
+            using (var topMutedBrush = new SolidBrush(this.theme.Muted))
+            using (var detailTextBrush = new SolidBrush(EmphasizeDetailTextColor(this.theme.Text)))
+            using (var muted = new SolidBrush(EmphasizeDetailMutedColor(this.theme.Muted, this.theme.Text)))
             {
                 var contentWidth = 424;
                 var contentLeft = (this.Width - contentWidth) / 2;
                 var titleText = T.Text("详情标题");
                 g.FillEllipse(accent, 20, 22, 10, 10);
-                this.SafeDrawString(g, titleText, titleFont, text, new RectangleF(38, 14, this.Width - 230, 24));
-                this.SafeDrawString(g, T.Text("更新") + " " + this.snapshot.UpdatedAt.ToString("HH:mm:ss"), smallFont, muted, new RectangleF(this.Width - 168, 18, 140, 18), StringAlignment.Far);
+                this.SafeDrawString(g, titleText, titleFont, titleTextBrush, new RectangleF(38, 14, this.Width - 230, 24));
+                this.SafeDrawString(g, T.Text("更新") + " " + this.snapshot.UpdatedAt.ToString("HH:mm:ss"), topUpdateFont, topMutedBrush, new RectangleF(this.Width - 168, 18, 140, 18), StringAlignment.Far);
                 if (this.behaviorConfig.ShowUserNameInDetails && !string.IsNullOrWhiteSpace(this.snapshot.Usage.UserName))
                 {
                     this.SafeDrawString(g, T.Text("账户标签") + " " + this.snapshot.Usage.UserName, smallFont, muted, new RectangleF(38, 38, this.Width - 76, 18));
@@ -2736,11 +4138,11 @@ namespace CodexFloat
 
                 if (this.snapshot.ErrorMessage != null)
                 {
-                    this.SafeDrawString(g, T.Text("连接失败"), bodyFont, text, new RectangleF(contentLeft, 68, contentWidth, 24));
-                    this.SafeDrawString(g, this.snapshot.ErrorMessage, bodyFont, text, new RectangleF(contentLeft, 94, contentWidth, 24));
+                    this.SafeDrawString(g, T.Text("连接失败"), bodyFont, detailTextBrush, new RectangleF(contentLeft, 68, contentWidth, 24));
+                    this.SafeDrawString(g, this.snapshot.ErrorMessage, bodyFont, detailTextBrush, new RectangleF(contentLeft, 94, contentWidth, 24));
                     this.SafeDrawString(g, T.Text("错误代码") + ": " + (this.snapshot.ErrorCode ?? "--"), smallFont, muted, new RectangleF(contentLeft, 118, contentWidth, 20));
                     this.SafeDrawString(g, Trim(this.snapshot.ErrorDetail ?? "", 150), smallFont, muted, new RectangleF(contentLeft, 144, contentWidth, 80));
-                    this.SafeDrawString(g, T.Text("查看错误日志提示"), smallFont, text, new RectangleF(0, 238, this.Width, 18), true);
+                    this.SafeDrawString(g, T.Text("查看错误日志提示"), smallFont, detailTextBrush, new RectangleF(0, 238, this.Width, 18), true);
                     return;
                 }
 
@@ -2765,8 +4167,8 @@ namespace CodexFloat
                 this.DrawCenteredText(g, this.CurrentUsage().RemainingPercent.ToString("0", CultureInfo.InvariantCulture) + "%", new Font("Segoe UI Semibold", 24f), this.theme.Text, new RectangleF(leftCircle.Left, leftCircle.Top + 46, leftCircle.Width, 38));
 
                 var y = 86;
-                this.DrawUsageLine(g, this.snapshot.Usage.FiveHour, usageX, y, usageBarWidth, bodyFont, smallFont, false); y += 52;
-                this.DrawUsageLine(g, this.snapshot.Usage.Weekly, usageX, y, usageBarWidth, bodyFont, smallFont, true); y += 58;
+                this.DrawUsageLine(g, this.snapshot.Usage.FiveHour, usageX, y, usageBarWidth, bodyFont, smallFont, false); y += 55;
+                this.DrawUsageLine(g, this.snapshot.Usage.Weekly, usageX, y, usageBarWidth, bodyFont, smallFont, true); y += 61;
 
                 var cardX = contentLeft;
                 var cardWidth = contentWidth;
@@ -2780,15 +4182,25 @@ namespace CodexFloat
                 }
                 else
                 {
-                    var cardY = cardYStart;
+                    var resetCardLines = new List<string>();
+                    var resetCardTextWidth = 0f;
                     for (int i = 0; i < this.snapshot.ResetCards.Expirations.Count; i++)
                     {
                         var line = T.Text("重置卡") + " " + (i + 1).ToString(CultureInfo.InvariantCulture) + ": " + DateText.ResetDescriptionDetailed(this.snapshot.ResetCards.Expirations[i]);
-                        this.SafeDrawString(g, line, smallFont, muted, new RectangleF(cardX, cardY, cardWidth, 18), StringAlignment.Center);
+                        resetCardLines.Add(line);
+                        resetCardTextWidth = Math.Max(resetCardTextWidth, g.MeasureString(line, smallFont).Width);
+                    }
+
+                    var resetCardGroupWidth = Math.Min(cardWidth, (int)Math.Ceiling(resetCardTextWidth) + 2);
+                    var resetCardGroupX = cardX + (cardWidth - resetCardGroupWidth) / 2;
+                    var cardY = cardYStart;
+                    for (int i = 0; i < resetCardLines.Count; i++)
+                    {
+                        this.SafeDrawString(g, resetCardLines[i], smallFont, muted, new RectangleF(resetCardGroupX, cardY, resetCardGroupWidth, 18), StringAlignment.Near);
                         cardY += 23;
                     }
                 }
-                this.DrawModelIqRow(g, contentLeft, iqTop, contentWidth, 38, smallFont, text, muted);
+                this.DrawModelIqRow(g, contentLeft, iqTop, contentWidth, 38, smallFont, detailTextBrush, muted);
             }
         }
 
@@ -2797,9 +4209,9 @@ namespace CodexFloat
             var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
             var gap = 8;
             var cellWidth = (width - gap * 3) / 4;
-            using (var border = new Pen(Color.FromArgb(72, 255, 255, 255), 1f))
-            using (var labelFont = new Font("Segoe UI", 7.1f))
-            using (var scoreFont = new Font("Segoe UI Semibold", 10.5f))
+            using (var border = new Pen(Color.FromArgb(90, 255, 255, 255), 1f))
+            using (var labelFont = new Font("Segoe UI Semibold", 7.8f))
+            using (var scoreFont = new Font("Segoe UI Semibold", 11.4f, FontStyle.Bold))
             {
                 for (int i = 0; i < 4; i++)
                 {
@@ -2817,8 +4229,8 @@ namespace CodexFloat
                         g.DrawPath(border, path);
                     }
 
-                    this.SafeDrawString(g, score.Label, labelFont, muted, new RectangleF(left + 5, y + 4, cellWidth - 10, 13), true);
-                    this.SafeDrawString(g, score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", scoreFont, text, new RectangleF(left + 5, y + 18, cellWidth - 10, 17), true);
+                    this.SafeDrawString(g, score.Label, labelFont, muted, new RectangleF(left + 5, y + 3, cellWidth - 10, 14), true);
+                    this.SafeDrawString(g, score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", scoreFont, text, new RectangleF(left + 5, y + 17, cellWidth - 10, 19), true);
                 }
             }
         }
@@ -2843,6 +4255,25 @@ namespace CodexFloat
                 case 2: return Color.FromArgb(178, 46, 83, 160);
                 default: return Color.FromArgb(178, 129, 83, 40);
             }
+        }
+
+        private static Color EmphasizeDetailTextColor(Color color)
+        {
+            return Color.FromArgb(Math.Max((int)color.A, 245), color.R, color.G, color.B);
+        }
+
+        private static Color EmphasizeDetailMutedColor(Color muted, Color text)
+        {
+            return Color.FromArgb(
+                Math.Max((int)muted.A, 238),
+                BlendChannel(muted.R, text.R, 0.32),
+                BlendChannel(muted.G, text.G, 0.32),
+                BlendChannel(muted.B, text.B, 0.32));
+        }
+
+        private static int BlendChannel(int from, int to, double ratio)
+        {
+            return Math.Max(0, Math.Min(255, (int)Math.Round(from + (to - from) * ratio)));
         }
 
         private void DrawUsageLine(Graphics g, UsageWindow usage, int x, int y, int barWidth, Font bodyFont, Font smallFont, bool detailedReset)
@@ -3181,6 +4612,122 @@ namespace CodexFloat
         }
     }
 
+    internal sealed class TrustedEnvironmentsForm : Form
+    {
+        private readonly ListView list = new ListView();
+        private readonly Button deleteButton = new Button();
+        public List<TrustedEnvironment> TrustedEnvironments;
+
+        public TrustedEnvironmentsForm(List<TrustedEnvironment> environments)
+        {
+            this.TrustedEnvironments = new List<TrustedEnvironment>();
+            if (environments != null)
+            {
+                foreach (var item in environments)
+                {
+                    if (item != null) this.TrustedEnvironments.Add(item.Clone());
+                }
+            }
+
+            this.Text = T.Text("env_trusted_library");
+            this.Size = new Size(720, 420);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowIcon = false;
+
+            var layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill;
+            layout.Padding = new Padding(14);
+            layout.RowCount = 3;
+            layout.ColumnCount = 1;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            this.Controls.Add(layout);
+
+            var hint = new Label();
+            hint.Text = T.Text("env_trusted_library_hint");
+            hint.Dock = DockStyle.Fill;
+            hint.TextAlign = ContentAlignment.MiddleLeft;
+            layout.Controls.Add(hint, 0, 0);
+
+            this.list.Dock = DockStyle.Fill;
+            this.list.View = View.Details;
+            this.list.FullRowSelect = true;
+            this.list.MultiSelect = true;
+            this.list.HideSelection = false;
+            this.list.Columns.Add("IP", 150);
+            this.list.Columns.Add(T.Text("env_location_label"), 360);
+            this.list.Columns.Add(T.Text("env_confirmed_at"), 160);
+            this.list.SelectedIndexChanged += delegate { this.deleteButton.Enabled = this.list.SelectedItems.Count > 0; };
+            layout.Controls.Add(this.list, 0, 1);
+
+            var buttons = new FlowLayoutPanel();
+            buttons.FlowDirection = FlowDirection.RightToLeft;
+            buttons.Dock = DockStyle.Fill;
+            buttons.Padding = new Padding(0, 8, 0, 0);
+            layout.Controls.Add(buttons, 0, 2);
+
+            var save = new Button();
+            save.Text = T.Text("保存");
+            save.Width = 90;
+            save.Click += delegate { this.DialogResult = DialogResult.OK; this.Close(); };
+            buttons.Controls.Add(save);
+
+            var cancel = new Button();
+            cancel.Text = T.Text("取消");
+            cancel.Width = 90;
+            cancel.Click += delegate { this.DialogResult = DialogResult.Cancel; this.Close(); };
+            buttons.Controls.Add(cancel);
+
+            this.deleteButton.Text = T.Text("env_delete_selected");
+            this.deleteButton.Width = 110;
+            this.deleteButton.Enabled = false;
+            this.deleteButton.Click += delegate { this.DeleteSelected(); };
+            buttons.Controls.Add(this.deleteButton);
+
+            this.RefreshList();
+        }
+
+        private void RefreshList()
+        {
+            this.list.Items.Clear();
+            for (int i = 0; i < this.TrustedEnvironments.Count; i++)
+            {
+                var trusted = this.TrustedEnvironments[i];
+                var info = trusted.ToInfo();
+                var location = info.EnglishLocation();
+                if (T.IsChinese)
+                {
+                    var chinese = info.ChineseLocation();
+                    if (!string.IsNullOrWhiteSpace(chinese)) location += " / " + chinese;
+                }
+                var item = new ListViewItem(new[] { trusted.Ip ?? "", location, trusted.ConfirmedAtText() });
+                item.Tag = trusted;
+                this.list.Items.Add(item);
+            }
+            this.deleteButton.Enabled = false;
+        }
+
+        private void DeleteSelected()
+        {
+            if (this.list.SelectedItems.Count == 0) return;
+            var selected = new List<TrustedEnvironment>();
+            foreach (ListViewItem item in this.list.SelectedItems)
+            {
+                var trusted = item.Tag as TrustedEnvironment;
+                if (trusted != null) selected.Add(trusted);
+            }
+            foreach (var trusted in selected)
+            {
+                this.TrustedEnvironments.Remove(trusted);
+            }
+            this.RefreshList();
+        }
+    }
+
     internal sealed class SettingsForm : Form
     {
         private const string MaskText = "********";
@@ -3200,8 +4747,13 @@ namespace CodexFloat
         private readonly CheckBox scrollGpt55HighBox = new CheckBox();
         private readonly CheckBox scrollGpt55MediumBox = new CheckBox();
         private readonly CheckBox scrollGpt54XHighBox = new CheckBox();
+        private readonly CheckBox envCheckOnStartupBox = new CheckBox();
+        private readonly CheckBox envConfirmMediumOnManualBox = new CheckBox();
+        private readonly CheckBox envRecheckHighOnManualBox = new CheckBox();
+        private readonly Button trustedEnvironmentsButton = new Button();
         private readonly Label hint = new Label();
         private readonly MonitorConfig initial;
+        private List<TrustedEnvironment> trustedEnvironments;
         private string pendingTokenDpapi;
         private string pendingAccountIdDpapi;
         public MonitorConfig Config;
@@ -3210,8 +4762,16 @@ namespace CodexFloat
         {
             this.initial = cfg;
             this.Config = cfg;
+            this.trustedEnvironments = new List<TrustedEnvironment>();
+            if (cfg.TrustedEnvironments != null)
+            {
+                foreach (var trusted in cfg.TrustedEnvironments)
+                {
+                    if (trusted != null) this.trustedEnvironments.Add(trusted.Clone());
+                }
+            }
             this.Text = T.Text("CodexFloat 设置");
-            this.Size = new Size(820, 560);
+            this.Size = new Size(860, 640);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -3221,7 +4781,7 @@ namespace CodexFloat
             layout.Dock = DockStyle.Fill;
             layout.Padding = new Padding(16);
             layout.ColumnCount = 2;
-            layout.RowCount = 9;
+            layout.RowCount = 10;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             this.Controls.Add(layout);
@@ -3271,6 +4831,19 @@ namespace CodexFloat
             this.scrollGpt54XHighBox.Text = T.Text("scroll_gpt_54_xhigh");
             this.scrollGpt54XHighBox.AutoSize = true;
             this.scrollGpt54XHighBox.Checked = cfg.ScrollShowGpt54XHigh;
+            this.envCheckOnStartupBox.Text = T.Text("env_check_on_startup");
+            this.envCheckOnStartupBox.AutoSize = true;
+            this.envCheckOnStartupBox.Checked = cfg.EnvironmentCheckOnStartup;
+            this.envConfirmMediumOnManualBox.Text = T.Text("env_confirm_medium_on_manual");
+            this.envConfirmMediumOnManualBox.AutoSize = true;
+            this.envConfirmMediumOnManualBox.Checked = cfg.EnvironmentConfirmMediumRiskOnManualRefresh;
+            this.envRecheckHighOnManualBox.Text = T.Text("env_recheck_high_on_manual");
+            this.envRecheckHighOnManualBox.AutoSize = true;
+            this.envRecheckHighOnManualBox.Checked = cfg.EnvironmentRecheckHighRiskOnManualRefresh;
+            this.trustedEnvironmentsButton.Text = T.Text("env_trusted_library");
+            this.trustedEnvironmentsButton.Width = 150;
+            this.trustedEnvironmentsButton.Height = 28;
+            this.trustedEnvironmentsButton.Click += delegate { this.OpenTrustedEnvironments(); };
 
             AddRow(layout, 0, "ACCESS_TOKEN", this.tokenBox);
             AddRow(layout, 1, "ACCOUNT_ID", this.accountBox);
@@ -3307,6 +4880,19 @@ namespace CodexFloat
             layout.Controls.Add(new Label { Text = T.Text("滚动数据"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 6);
             layout.Controls.Add(scrollPanel, 1, 6);
 
+            var envPanel = new FlowLayoutPanel();
+            envPanel.Dock = DockStyle.Fill;
+            envPanel.FlowDirection = FlowDirection.LeftToRight;
+            envPanel.WrapContents = true;
+            envPanel.Padding = new Padding(0, 5, 0, 0);
+            envPanel.Controls.Add(this.envCheckOnStartupBox);
+            envPanel.Controls.Add(this.envConfirmMediumOnManualBox);
+            envPanel.Controls.Add(this.envRecheckHighOnManualBox);
+            envPanel.Controls.Add(this.trustedEnvironmentsButton);
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 74));
+            layout.Controls.Add(new Label { Text = T.Text("env_safety_title"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 7);
+            layout.Controls.Add(envPanel, 1, 7);
+
             var importPanel = new FlowLayoutPanel();
             importPanel.Dock = DockStyle.Fill;
             importPanel.FlowDirection = FlowDirection.LeftToRight;
@@ -3317,13 +4903,13 @@ namespace CodexFloat
             autoImport.Click += delegate { this.AutoImportCredentials(); };
             importPanel.Controls.Add(autoImport);
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            layout.Controls.Add(new Label { Text = T.Text("凭据"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 7);
-            layout.Controls.Add(importPanel, 1, 7);
+            layout.Controls.Add(new Label { Text = T.Text("凭据"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 8);
+            layout.Controls.Add(importPanel, 1, 8);
 
             this.hint.Text = T.Text("凭据提示");
             this.hint.Dock = DockStyle.Fill;
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.Controls.Add(this.hint, 1, 8);
+            layout.Controls.Add(this.hint, 1, 9);
 
             var buttons = new FlowLayoutPanel();
             buttons.FlowDirection = FlowDirection.RightToLeft;
@@ -3386,6 +4972,36 @@ namespace CodexFloat
             next.ScrollShowGpt55High = this.scrollGpt55HighBox.Checked;
             next.ScrollShowGpt55Medium = this.scrollGpt55MediumBox.Checked;
             next.ScrollShowGpt54XHigh = this.scrollGpt54XHighBox.Checked;
+            next.EnvironmentCheckOnStartup = this.envCheckOnStartupBox.Checked;
+            next.EnvironmentConfirmMediumRiskOnManualRefresh = this.envConfirmMediumOnManualBox.Checked;
+            next.EnvironmentRecheckHighRiskOnManualRefresh = this.envRecheckHighOnManualBox.Checked;
+            next.TrustedEnvironments = new List<TrustedEnvironment>();
+            foreach (var trusted in this.trustedEnvironments)
+            {
+                if (trusted != null) next.TrustedEnvironments.Add(trusted.Clone());
+            }
+            next.EnvironmentLastConfirmedIp = this.initial.EnvironmentLastConfirmedIp;
+            next.EnvironmentLastConfirmedCountryCode = this.initial.EnvironmentLastConfirmedCountryCode;
+            next.EnvironmentLastConfirmedCountryName = this.initial.EnvironmentLastConfirmedCountryName;
+            next.EnvironmentLastConfirmedRegion = this.initial.EnvironmentLastConfirmedRegion;
+            next.EnvironmentLastConfirmedCity = this.initial.EnvironmentLastConfirmedCity;
+            if (next.TrustedEnvironments.Count > 0)
+            {
+                var lastTrusted = next.TrustedEnvironments[next.TrustedEnvironments.Count - 1];
+                next.EnvironmentLastConfirmedIp = lastTrusted.Ip;
+                next.EnvironmentLastConfirmedCountryCode = lastTrusted.CountryCode;
+                next.EnvironmentLastConfirmedCountryName = lastTrusted.CountryName;
+                next.EnvironmentLastConfirmedRegion = lastTrusted.Region;
+                next.EnvironmentLastConfirmedCity = lastTrusted.City;
+            }
+            else
+            {
+                next.EnvironmentLastConfirmedIp = "";
+                next.EnvironmentLastConfirmedCountryCode = "";
+                next.EnvironmentLastConfirmedCountryName = "";
+                next.EnvironmentLastConfirmedRegion = "";
+                next.EnvironmentLastConfirmedCity = "";
+            }
             next.ResetCardsEndpoint = this.initial.ResetCardsEndpoint;
             next.UsageEndpoint = this.usageBox.Text.Trim();
             next.Originator = this.initial.Originator;
@@ -3402,6 +5018,18 @@ namespace CodexFloat
             this.Config = next;
             this.DialogResult = DialogResult.OK;
             this.Close();
+        }
+
+        private void OpenTrustedEnvironments()
+        {
+            using (var form = new TrustedEnvironmentsForm(this.trustedEnvironments))
+            {
+                if (form.ShowDialog(this) == DialogResult.OK)
+                {
+                    this.trustedEnvironments = form.TrustedEnvironments;
+                    this.trustedEnvironmentsButton.Text = T.Text("env_trusted_library") + " (" + this.trustedEnvironments.Count.ToString(CultureInfo.InvariantCulture) + ")";
+                }
+            }
         }
 
         private void AutoImportCredentials()
@@ -4116,6 +5744,40 @@ namespace CodexFloat
                 case "同步短": return "同步";
                 case "连接短": return "连接";
                 case "更新中省略": return "更新中...";
+                case "env_safety_title": return "环境安全监测";
+                case "env_check_on_startup": return "启动时自动检测环境";
+                case "env_confirm_medium_on_manual": return "中风险手动刷新时二次确认";
+                case "env_recheck_high_on_manual": return "高风险手动刷新时再次检测";
+                case "env_trusted_library": return "受信任地址库...";
+                case "env_trusted_library_hint": return "已确认安全的 IP 和地址会保存在这里；选中过期记录后可删除。";
+                case "env_confirmed_at": return "确认时间";
+                case "env_delete_selected": return "删除选中";
+                case "env_location_label": return "所在地";
+                case "env_badge_safe": return "安全";
+                case "env_badge_medium": return "中危";
+                case "env_badge_high": return "高危";
+                case "env_safe_title": return "环境检测安全";
+                case "env_safe_message": return "当前网络环境与受信任环境记录一致，已继续查询。";
+                case "env_initial_trust_title": return "确认默认受信任环境";
+                case "env_initial_trust_message": return "当前没有受信任地址库记录。请确认是否将当前 IP 和地址设为默认受信任环境并继续查询。";
+                case "env_initial_trust_pending_message": return "等待用户确认默认受信任环境后手动刷新查询。";
+                case "env_initial_trust_continue": return "设为受信任环境\r\n继续查询";
+                case "env_initial_trust_wait": return "待我确认网络环境后\r\n手动刷新查询";
+                case "env_medium_risk_title": return "当前环境存在风险（风险等级：中）";
+                case "env_medium_risk_changed": return "当前 IP 或所在地不在受信任地址库中，请确认是否继续查询。";
+                case "env_medium_risk_first_confirm": return "当前没有已确认的环境记录，请确认是否将当前环境作为安全环境继续查询。";
+                case "env_medium_pending_message": return "等待用户确认环境后手动刷新查询。";
+                case "env_popup_confirm": return "确认";
+                case "env_info_unavailable": return "当前无法查询到有效的 IP 和地址。";
+                case "env_mini_risk": return "环境风险";
+                case "env_mini_check_failed": return "检测失败";
+                case "env_confirm_continue": return "确认网络环境无风险\r\n继续查询";
+                case "env_wait_manual": return "待我确认网络环境后\r\n手动刷新查询";
+                case "env_high_risk_title": return "当前环境存在风险（风险等级：高）";
+                case "env_high_risk_message": return "检测到 IP 所在地为中国或香港，已停止连接和查询。请更新环境配置后手动刷新。";
+                case "env_high_risk_wait_message": return "高风险环境已阻止查询。请更新环境配置后手动刷新。";
+                case "env_check_failed_title": return "环境检测失败";
+                case "env_check_failed_message": return "无法验证当前网络和 IP，已暂停连接 ChatGPT 接口。请检查网络后手动刷新。";
                 case "error_click_details": return "点击查看";
                 case "error_missing_credentials_summary": return "未找到登录";
                 case "error_missing_credentials_detail": return "未找到 Codex 登录凭据。请先启动 Codex 并确认已登录，然后在设置中使用自动读取，或手动保存 ACCESS_TOKEN 和 ACCOUNT_ID。";
@@ -4219,6 +5881,40 @@ namespace CodexFloat
                 case "同步短": return "SYNC";
                 case "连接短": return "API";
                 case "更新中省略": return "Updating...";
+                case "env_safety_title": return "Environment Safety";
+                case "env_check_on_startup": return "Check Environment On Startup";
+                case "env_confirm_medium_on_manual": return "Confirm Medium Risk On Manual Refresh";
+                case "env_recheck_high_on_manual": return "Recheck High Risk On Manual Refresh";
+                case "env_trusted_library": return "Trusted Address Library...";
+                case "env_trusted_library_hint": return "Confirmed safe IP addresses and locations are stored here. Select stale records to delete them.";
+                case "env_confirmed_at": return "Confirmed At";
+                case "env_delete_selected": return "Delete Selected";
+                case "env_location_label": return "Location";
+                case "env_badge_safe": return "Safe";
+                case "env_badge_medium": return "Medium";
+                case "env_badge_high": return "High";
+                case "env_safe_title": return "Environment Check Safe";
+                case "env_safe_message": return "The current network environment matches a trusted record. Querying will continue.";
+                case "env_initial_trust_title": return "Confirm Default Trusted Environment";
+                case "env_initial_trust_message": return "No trusted address library record exists yet. Confirm whether to set the current IP and location as trusted and continue querying.";
+                case "env_initial_trust_pending_message": return "Waiting for default trusted environment confirmation before manual refresh querying.";
+                case "env_initial_trust_continue": return "Trust this environment\r\nContinue querying";
+                case "env_initial_trust_wait": return "Verify network first\r\nRefresh manually";
+                case "env_medium_risk_title": return "Current Environment Risk: Medium";
+                case "env_medium_risk_changed": return "The current IP or location is not in the trusted address library. Confirm whether to continue querying.";
+                case "env_medium_risk_first_confirm": return "No confirmed environment record exists yet. Confirm whether to trust the current environment and continue querying.";
+                case "env_medium_pending_message": return "Waiting for manual environment confirmation before querying.";
+                case "env_popup_confirm": return "OK";
+                case "env_info_unavailable": return "No valid IP or location could be detected.";
+                case "env_mini_risk": return "Risk Env.";
+                case "env_mini_check_failed": return "Env Fail";
+                case "env_confirm_continue": return "Confirm network is safe\r\nContinue querying";
+                case "env_wait_manual": return "Verify network first\r\nRefresh manually";
+                case "env_high_risk_title": return "Current Environment Risk: High";
+                case "env_high_risk_message": return "The IP location is China or Hong Kong, so connections and queries have been stopped. Update the environment and refresh manually.";
+                case "env_high_risk_wait_message": return "High-risk environment blocked querying. Update the environment and refresh manually.";
+                case "env_check_failed_title": return "Environment Check Failed";
+                case "env_check_failed_message": return "CodexFloat could not verify the current network and IP, so it paused ChatGPT API connections. Check the network and refresh manually.";
                 case "error_click_details": return "Details";
                 case "error_missing_credentials_summary": return "Not Signed In";
                 case "error_missing_credentials_detail": return "No Codex login credentials were found. Start Codex and make sure you are signed in, then use Auto Import in Settings or manually save ACCESS_TOKEN and ACCOUNT_ID.";

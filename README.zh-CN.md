@@ -54,6 +54,14 @@ CodexFloat.exe
 - 鼠标穿透。
 - 锁定窗口位置。
 
+`环境安全监测` 支持：
+
+- 软件启动时自动检测当前 IP 和所在地。
+- 检测到中风险环境后，手动刷新时是否再次弹窗确认。
+- 检测到中国或香港 IP 的高风险环境后，手动刷新时是否强制再次检测。
+- 已由用户确认安全的中风险环境会保存到受信任地址库，可从 `环境安全监测` 菜单查看和删除过期记录。
+- 当没有任何受信任地址库记录时，CodexFloat 会单独询问是否将当前 IP 和地址设为默认受信任环境。
+
 鼠标穿透开启后，悬浮窗会把鼠标事件传给下层窗口；需要修改设置时，可通过右下角托盘图标的 `Behavior` 菜单或 `Settings` 关闭穿透。
 
 ## 语言
@@ -99,6 +107,9 @@ https://github.com/RayOhmie
 - 1 周窗口剩余额度、进度条、重置倒计时。
 - 两张或多张重置卡的到期倒计时和具体时间。
 - 模型 IQ 参考分数，数据来源为 [Codex Radar](https://codexradar.com/)，感谢 Codex Radar 提供数据参考。
+
+环境安全监测使用公共 IP 定位数据。中文界面下，CodexFloat 会额外获取中文所在地显示文本；这部分中文文本只用于显示，不作为环境风险判断依据。
+当用户把中风险环境确认为安全时，CodexFloat 会把当前 IP 和地址加入受信任地址库，而不是覆盖掉原来的唯一记录。
 
 重置时间格式：
 
@@ -186,6 +197,4 @@ remaining = 100 - used_percent
 
 - `CodexFloat.exe`: 主程序。
 - `CodexFloat.cs`: 当前圆形悬浮窗版本源码。
-- `legacy/`: 旧实验版本和旧 PowerShell 辅助脚本，保留作历史参考。
-- `Setup-CodexMonitorSecrets.ps1`, `Start-CodexMonitor.ps1`, `Set-CodexUsageEndpoint.ps1`: 旧 PowerShell 辅助脚本。
 
