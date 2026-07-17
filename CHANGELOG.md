@@ -4,6 +4,8 @@ All notable public changes to CodexFloat will be documented in this file.
 
 ## Unreleased
 
+## 0.1.49 - 2026-07-17
+
 - Detect 5-hour and weekly usage windows by their reported duration, and skip unavailable 5-hour rotation pages while OpenAI temporarily omits that window.
 - Replace the expanded panel with a compact WPF dashboard and reset-card view using the approved standard layout.
 - Add Emerald, Violet, Graphite, and Rose color themes, with Graphite as the default.

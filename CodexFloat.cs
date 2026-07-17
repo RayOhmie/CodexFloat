@@ -22,9 +22,9 @@ using WinFormsTimer = System.Windows.Forms.Timer;
 [assembly: AssemblyCompany("RayOhmie")]
 [assembly: AssemblyProduct("CodexFloat")]
 [assembly: AssemblyCopyright("Copyright (C) 2026 By RayOhmie")]
-[assembly: AssemblyVersion("0.1.48.0")]
-[assembly: AssemblyFileVersion("0.1.48.0")]
-[assembly: AssemblyInformationalVersion("0.1.48")]
+[assembly: AssemblyVersion("0.1.49.0")]
+[assembly: AssemblyFileVersion("0.1.49.0")]
+[assembly: AssemblyInformationalVersion("0.1.49")]
 
 namespace CodexFloat
 {
