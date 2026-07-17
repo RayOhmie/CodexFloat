@@ -4,6 +4,16 @@ All notable public changes to CodexFloat will be documented in this file.
 
 ## Unreleased
 
+- Detect 5-hour and weekly usage windows by their reported duration, and skip unavailable 5-hour rotation pages while OpenAI temporarily omits that window.
+- Replace the expanded panel with a compact WPF dashboard and reset-card view using the approved standard layout.
+- Add Emerald, Violet, Graphite, and Rose color themes, with Graphite as the default.
+- Update Codex Radar model IQ parsing and display for the current GPT-5.6 model lineup.
+- Enlarge the floating widget, split IQ model names across two lines, and improve text contrast over high water levels.
+- Improve reset-card tables for multiple cards with aligned columns, paging, and consistent row spacing.
+- Group Help, About, Check Updates, and Error Logs under a Help submenu.
+- Remove the Reset Floating Position context-menu action.
+- Rework Settings into a smaller resizable tabbed dialog with compact dual-column parameter rows where practical.
+
 ## 0.1.48 - 2026-06-26
 
 - Show a separate first-run trusted-environment confirmation popup when no trusted address library exists, and keep the Environment Safety submenu arrow visible before hover.

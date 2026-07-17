@@ -14,6 +14,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
+using ElementHost = System.Windows.Forms.Integration.ElementHost;
 using WinFormsTimer = System.Windows.Forms.Timer;
 
 [assembly: AssemblyTitle("CodexFloat")]
@@ -76,7 +77,6 @@ namespace CodexFloat
             this.bar.RefreshRequested += delegate { this.RefreshNow(true); };
             this.bar.SettingsRequested += delegate { this.ShowSettings(false); };
             this.bar.TrustedEnvironmentsRequested += delegate { this.ShowTrustedEnvironments(); };
-            this.bar.ResetPositionRequested += delegate { this.ResetPosition(); };
             this.bar.HelpRequested += delegate { this.ShowHelp(); };
             this.bar.ErrorLogRequested += delegate { this.ShowErrorLogs(); };
             this.bar.AboutRequested += delegate { this.ShowAbout(); };
@@ -171,11 +171,7 @@ namespace CodexFloat
             menu.Items.Add(this.BuildScrollDataMenu());
             menu.Items.Add(this.BuildLanguageMenu());
             menu.Items.Add(T.Text("设置"), null, delegate { this.ShowSettings(false); });
-            menu.Items.Add(T.Text("重置悬浮窗位置"), null, delegate { this.ResetPosition(); });
-            menu.Items.Add(T.Text("帮助"), null, delegate { this.ShowHelp(); });
-            menu.Items.Add(T.Text("关于"), null, delegate { this.ShowAbout(); });
-            menu.Items.Add(T.Text("检查更新"), null, delegate { this.CheckUpdates(); });
-            menu.Items.Add(T.Text("查看错误日志"), null, delegate { this.ShowErrorLogs(); });
+            menu.Items.Add(this.BuildHelpMenu());
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(T.Text("退出"), null, delegate { this.ExitApp(); });
             MenuDropDownPlacer.Attach(menu, this.FloatingScreenBounds);
@@ -240,6 +236,18 @@ namespace CodexFloat
             root.DropDownItems.Add(this.BuildToggleItem(T.Text("scroll_gpt_55_high"), this.config.ScrollShowGpt55High, delegate { this.config.ScrollShowGpt55High = !this.config.ScrollShowGpt55High; this.SaveScrollSelection(); }));
             root.DropDownItems.Add(this.BuildToggleItem(T.Text("scroll_gpt_55_medium"), this.config.ScrollShowGpt55Medium, delegate { this.config.ScrollShowGpt55Medium = !this.config.ScrollShowGpt55Medium; this.SaveScrollSelection(); }));
             root.DropDownItems.Add(this.BuildToggleItem(T.Text("scroll_gpt_54_xhigh"), this.config.ScrollShowGpt54XHigh, delegate { this.config.ScrollShowGpt54XHigh = !this.config.ScrollShowGpt54XHigh; this.SaveScrollSelection(); }));
+            root.DropDownItems.Add(this.BuildToggleItem(T.Text("scroll_gpt_56_luna_medium"), this.config.ScrollShowGpt56LunaMedium, delegate { this.config.ScrollShowGpt56LunaMedium = !this.config.ScrollShowGpt56LunaMedium; this.SaveScrollSelection(); }));
+            return root;
+        }
+
+        private ToolStripMenuItem BuildHelpMenu()
+        {
+            var root = new ToolStripMenuItem(T.Text("帮助"));
+            root.DropDownItems.Add(T.Text("帮助"), null, delegate { this.ShowHelp(); });
+            root.DropDownItems.Add(T.Text("关于"), null, delegate { this.ShowAbout(); });
+            root.DropDownItems.Add(T.Text("检查更新"), null, delegate { this.CheckUpdates(); });
+            root.DropDownItems.Add(T.Text("查看错误日志"), null, delegate { this.ShowErrorLogs(); });
+            root.DropDownOpening += delegate { MenuDropDownPlacer.AttachChildren(root, this.FloatingScreenBounds); };
             return root;
         }
 
@@ -258,6 +266,7 @@ namespace CodexFloat
             target.ScrollShowGpt55High = source.ScrollShowGpt55High;
             target.ScrollShowGpt55Medium = source.ScrollShowGpt55Medium;
             target.ScrollShowGpt54XHigh = source.ScrollShowGpt54XHigh;
+            target.ScrollShowGpt56LunaMedium = source.ScrollShowGpt56LunaMedium;
         }
 
         private ToolStripMenuItem BuildOpacityMenu()
@@ -642,14 +651,6 @@ namespace CodexFloat
             this.bar.ShowExpandedTemporarily();
         }
 
-        private void ResetPosition()
-        {
-            this.config.FloatingX = null;
-            this.config.FloatingY = null;
-            this.store.Save(this.config);
-            this.bar.SetInitialLocation(null, null);
-        }
-
         private void ShowSettings(bool firstRun)
         {
             using (var form = new SettingsForm(this.config))
@@ -742,7 +743,8 @@ namespace CodexFloat
         public string UsageEndpoint = "https://chatgpt.com/backend-api/wham/usage";
         public string Originator = "Codex Desktop";
         public string OpenAIBeta = "codex-1";
-        public string ThemeName = "Traffic Classic";
+        public string ThemeName = "Graphite";
+        public string ExpandedUiStyle = ExpandedUiStyleOptions.Standard;
         public string Language = "zh-CN";
         public bool AutoStart;
         public int OpacityPercent = 100;
@@ -756,6 +758,7 @@ namespace CodexFloat
         public bool ScrollShowGpt55High = true;
         public bool ScrollShowGpt55Medium = true;
         public bool ScrollShowGpt54XHigh = true;
+        public bool ScrollShowGpt56LunaMedium = true;
         public bool EnvironmentCheckOnStartup = true;
         public bool EnvironmentConfirmMediumRiskOnManualRefresh = true;
         public bool EnvironmentRecheckHighRiskOnManualRefresh = true;
@@ -824,7 +827,8 @@ namespace CodexFloat
                 if (string.IsNullOrWhiteSpace(cfg.UsageEndpoint)) cfg.UsageEndpoint = "https://chatgpt.com/backend-api/wham/usage";
                 cfg.Originator = GetString(root, "originator", cfg.Originator);
                 cfg.OpenAIBeta = GetString(root, "openai_beta", cfg.OpenAIBeta);
-                cfg.ThemeName = GetString(root, "theme", cfg.ThemeName);
+                cfg.ThemeName = ThemePalette.NormalizeName(GetString(root, "theme", cfg.ThemeName));
+                cfg.ExpandedUiStyle = ExpandedUiStyleOptions.Normalize(GetString(root, "expanded_ui_style", cfg.ExpandedUiStyle));
                 cfg.Language = GetString(root, "language", cfg.Language);
                 cfg.AutoStart = GetBool(root, "auto_start", cfg.AutoStart);
                 cfg.OpacityPercent = Math.Max(35, Math.Min(100, GetInt(root, "opacity_percent", cfg.OpacityPercent)));
@@ -838,6 +842,7 @@ namespace CodexFloat
                 cfg.ScrollShowGpt55High = GetBool(root, "scroll_show_gpt_55_high", cfg.ScrollShowGpt55High);
                 cfg.ScrollShowGpt55Medium = GetBool(root, "scroll_show_gpt_55_medium", cfg.ScrollShowGpt55Medium);
                 cfg.ScrollShowGpt54XHigh = GetBool(root, "scroll_show_gpt_54_xhigh", cfg.ScrollShowGpt54XHigh);
+                cfg.ScrollShowGpt56LunaMedium = GetBool(root, "scroll_show_gpt_56_luna_medium", cfg.ScrollShowGpt56LunaMedium);
                 cfg.EnvironmentCheckOnStartup = GetBool(root, "environment_check_on_startup", cfg.EnvironmentCheckOnStartup);
                 cfg.EnvironmentConfirmMediumRiskOnManualRefresh = GetBool(root, "environment_confirm_medium_risk_on_manual_refresh", cfg.EnvironmentConfirmMediumRiskOnManualRefresh);
                 cfg.EnvironmentRecheckHighRiskOnManualRefresh = GetBool(root, "environment_recheck_high_risk_on_manual_refresh", cfg.EnvironmentRecheckHighRiskOnManualRefresh);
@@ -897,7 +902,8 @@ namespace CodexFloat
             root["usage_endpoint"] = cfg.UsageEndpoint ?? "";
             root["originator"] = cfg.Originator ?? "";
             root["openai_beta"] = cfg.OpenAIBeta ?? "";
-            root["theme"] = cfg.ThemeName ?? "Traffic Classic";
+            root["theme"] = ThemePalette.NormalizeName(cfg.ThemeName);
+            root["expanded_ui_style"] = ExpandedUiStyleOptions.Normalize(cfg.ExpandedUiStyle);
             root["language"] = string.IsNullOrWhiteSpace(cfg.Language) ? "zh-CN" : cfg.Language;
             root["auto_start"] = cfg.AutoStart;
             root["opacity_percent"] = cfg.OpacityPercent;
@@ -911,6 +917,7 @@ namespace CodexFloat
             root["scroll_show_gpt_55_high"] = cfg.ScrollShowGpt55High;
             root["scroll_show_gpt_55_medium"] = cfg.ScrollShowGpt55Medium;
             root["scroll_show_gpt_54_xhigh"] = cfg.ScrollShowGpt54XHigh;
+            root["scroll_show_gpt_56_luna_medium"] = cfg.ScrollShowGpt56LunaMedium;
             root["environment_check_on_startup"] = cfg.EnvironmentCheckOnStartup;
             root["environment_confirm_medium_risk_on_manual_refresh"] = cfg.EnvironmentConfirmMediumRiskOnManualRefresh;
             root["environment_recheck_high_risk_on_manual_refresh"] = cfg.EnvironmentRecheckHighRiskOnManualRefresh;
@@ -2619,8 +2626,8 @@ namespace CodexFloat
             var rateLimit = Dict(source, "rate_limit") ?? Dict(root, "rate_limit");
             if (rateLimit != null)
             {
-                info.FiveHour = UsageWindow.FromJson("5h", Dict(rateLimit, "primary_window") ?? Dict(rateLimit, "primary"), 18000);
-                info.Weekly = UsageWindow.FromJson("Weekly", Dict(rateLimit, "secondary_window") ?? Dict(rateLimit, "secondary"), 604800);
+                AssignRateLimitWindow(info, Dict(rateLimit, "primary_window") ?? Dict(rateLimit, "primary"), false);
+                AssignRateLimitWindow(info, Dict(rateLimit, "secondary_window") ?? Dict(rateLimit, "secondary"), true);
             }
             var credits = Dict(root, "credits");
             if (credits != null)
@@ -2629,6 +2636,29 @@ namespace CodexFloat
                 info.HasCredits = Bool(credits, "has_credits") || Bool(credits, "hasCredits");
             }
             return info;
+        }
+
+        private static void AssignRateLimitWindow(UsageInfo info, Dictionary<string, object> window, bool weeklyFallback)
+        {
+            if (info == null || window == null) return;
+            var seconds = Number(window, "limit_window_seconds");
+            if (!seconds.HasValue)
+            {
+                var minutes = Number(window, "window_minutes");
+                if (minutes.HasValue) seconds = minutes.Value * 60.0;
+            }
+
+            var isWeekly = seconds.HasValue
+                ? seconds.Value >= 2.0 * 24.0 * 60.0 * 60.0
+                : weeklyFallback;
+            if (isWeekly)
+            {
+                info.Weekly = UsageWindow.FromJson("Weekly", window, 604800);
+            }
+            else
+            {
+                info.FiveHour = UsageWindow.FromJson("5h", window, 18000);
+            }
         }
 
         private static string FindUserName(Dictionary<string, object> root)
@@ -2869,28 +2899,34 @@ namespace CodexFloat
         public static ModelIqRadar Empty()
         {
             var radar = new ModelIqRadar();
-            radar.Scores.Add(new ModelIqScore("GPT-5.5-XHigh"));
-            radar.Scores.Add(new ModelIqScore("GPT-5.5-High"));
-            radar.Scores.Add(new ModelIqScore("GPT-5.5-Medium"));
-            radar.Scores.Add(new ModelIqScore("GPT-5.4-XHigh"));
+            radar.Scores.Add(new ModelIqScore("GPT-5.6-Sol-ultra"));
+            radar.Scores.Add(new ModelIqScore("GPT-5.6-Sol-medium"));
+            radar.Scores.Add(new ModelIqScore("GPT-5.6-Sol-low"));
+            radar.Scores.Add(new ModelIqScore("GPT-5.6-Terra-medium"));
+            radar.Scores.Add(new ModelIqScore("GPT-5.6-Luna-medium"));
             return radar;
         }
 
         public static ModelIqRadar FromJson(Dictionary<string, object> root)
         {
-            var radar = Empty();
-            if (root == null) return radar;
+            var radar = new ModelIqRadar();
+            if (root == null) return Empty();
             DateTime updated;
             if (DateText.TryParseDate(UsageInfo.Text(root, "monitored_at"), out updated)) radar.UpdatedAt = updated;
 
             var modelIq = UsageInfo.Dict(root, "model_iq");
-            if (modelIq == null) return radar;
-            radar.Scores[0] = ScoreFromLatest("GPT-5.5-XHigh", UsageInfo.Dict(modelIq, "latest"));
+            if (modelIq == null) return Empty();
+            var latest = UsageInfo.Dict(modelIq, "latest");
+            radar.Scores.Add(ScoreFromLatest(LabelFromModelConfig(latest, "GPT-5.6-Sol-ultra"), latest));
 
             var comparisons = UsageInfo.Dict(modelIq, "comparisons");
-            radar.Scores[1] = ScoreFromComparison("GPT-5.5-High", UsageInfo.Dict(comparisons, "gpt_55_high"));
-            radar.Scores[2] = ScoreFromComparison("GPT-5.5-Medium", UsageInfo.Dict(comparisons, "gpt_55_medium"));
-            radar.Scores[3] = ScoreFromComparison("GPT-5.4-XHigh", UsageInfo.Dict(comparisons, "gpt_54_xhigh"));
+            foreach (var key in new[] { "gpt_56_sol_medium", "gpt_56_sol_low", "gpt_56_terra_medium", "gpt_56_luna_medium" })
+            {
+                var comparison = UsageInfo.Dict(comparisons, key);
+                if (comparison != null) radar.Scores.Add(ScoreFromComparison(comparison));
+            }
+            AppendAdditionalComparisons(radar, comparisons);
+            if (radar.Scores.Count == 0) return Empty();
             return radar;
         }
 
@@ -2903,9 +2939,39 @@ namespace CodexFloat
             return false;
         }
 
-        private static ModelIqScore ScoreFromComparison(string label, Dictionary<string, object> root)
+        private static void AppendAdditionalComparisons(ModelIqRadar radar, Dictionary<string, object> comparisons)
         {
-            return ScoreFromLatest(label, UsageInfo.Dict(root, "latest"));
+            if (comparisons == null) return;
+            foreach (var kv in comparisons)
+            {
+                if (IsKnownModelIqKey(kv.Key)) continue;
+                var comparison = kv.Value as Dictionary<string, object>;
+                if (comparison == null) continue;
+                var score = ScoreFromComparison(comparison);
+                if (string.IsNullOrWhiteSpace(score.Label)) continue;
+                bool exists = false;
+                foreach (var existing in radar.Scores)
+                {
+                    if (string.Equals(existing.Label, score.Label, StringComparison.OrdinalIgnoreCase)) { exists = true; break; }
+                }
+                if (!exists) radar.Scores.Add(score);
+            }
+        }
+
+        private static bool IsKnownModelIqKey(string key)
+        {
+            return string.Equals(key, "gpt_56_sol_medium", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "gpt_56_sol_low", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "gpt_56_terra_medium", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "gpt_56_luna_medium", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static ModelIqScore ScoreFromComparison(Dictionary<string, object> root)
+        {
+            var latest = UsageInfo.Dict(root, "latest");
+            var label = LabelFromModelConfig(root, UsageInfo.Text(root, "label"));
+            if (string.IsNullOrWhiteSpace(label)) label = LabelFromModelConfig(latest, "--");
+            return ScoreFromLatest(label, latest);
         }
 
         private static ModelIqScore ScoreFromLatest(string label, Dictionary<string, object> latest)
@@ -2922,6 +2988,50 @@ namespace CodexFloat
             DateTime date;
             if (DateText.TryParseDate(UsageInfo.Text(latest, "date"), out date)) score.Date = date;
             return score;
+        }
+
+        private static string LabelFromModelConfig(Dictionary<string, object> root, string fallback)
+        {
+            if (root == null) return NormalizeModelIqLabel(fallback);
+            var model = UsageInfo.Text(root, "model");
+            var effort = UsageInfo.Text(root, "reasoning_effort");
+            if (!string.IsNullOrWhiteSpace(model) && !string.IsNullOrWhiteSpace(effort))
+            {
+                return TitleModelName(model) + "-" + effort.Trim().ToLowerInvariant();
+            }
+            return NormalizeModelIqLabel(fallback);
+        }
+
+        private static string NormalizeModelIqLabel(string label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return "--";
+            label = label.Trim();
+            if (label.IndexOf(' ') >= 0 && label.StartsWith("GPT-", StringComparison.OrdinalIgnoreCase))
+            {
+                label = label.Replace(" ", "-");
+            }
+            return label;
+        }
+
+        private static string TitleModelName(string model)
+        {
+            var parts = model.Trim().Split(new[] { '-' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return model.Trim();
+            var sb = new StringBuilder();
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i > 0) sb.Append("-");
+                if (i == 0 && string.Equals(parts[i], "gpt", StringComparison.OrdinalIgnoreCase))
+                {
+                    sb.Append("GPT");
+                }
+                else if (parts[i].Length > 0)
+                {
+                    sb.Append(char.ToUpperInvariant(parts[i][0]));
+                    if (parts[i].Length > 1) sb.Append(parts[i].Substring(1).ToLowerInvariant());
+                }
+            }
+            return sb.ToString();
         }
     }
 
@@ -3038,6 +3148,31 @@ namespace CodexFloat
         public LanguageEventArgs(string language) { this.Language = language; }
     }
 
+    internal static class ExpandedUiStyleOptions
+    {
+        public const string Standard = "standard";
+        public const string MiniDark = "mini-dark";
+        public const string MiniCyan = "mini-cyan";
+        public const string MiniPurple = "mini-purple";
+        public const string MiniLight = "mini-light";
+        public static readonly string[] Names = new[] { Standard };
+
+        public static string Normalize(string value)
+        {
+            return Standard;
+        }
+
+        public static bool IsMini(string value)
+        {
+            return false;
+        }
+
+        public static string Label(string value)
+        {
+            return T.Text("expanded_ui_standard");
+        }
+    }
+
     internal sealed class MonitorTheme
     {
         public string Name;
@@ -3052,80 +3187,134 @@ namespace CodexFloat
         public Color Text;
         public Color Muted;
         public Color RingBase;
+        public Color StandardBack;
+        public Color StandardSurface;
+        public Color StandardTableHeader;
+        public Color StandardBorder;
+        public Color StandardText;
+        public Color StandardMuted;
+        public Color StandardAccent;
+        public Color StandardProgressTrack;
     }
 
     internal static class ThemePalette
     {
-        public static readonly string[] Names = new[] { "Traffic Classic", "Traffic Blue", "Minimal Dark", "Warm Amber" };
+        public static readonly string[] Names = new[] { "Emerald", "Violet", "Graphite", "Rose" };
         private static readonly Color CountdownSafeColor = Color.FromArgb(64, 230, 178);
+
+        public static string NormalizeName(string name)
+        {
+            if (string.Equals(name, "Emerald", StringComparison.OrdinalIgnoreCase)) return "Emerald";
+            if (string.Equals(name, "Violet", StringComparison.OrdinalIgnoreCase)) return "Violet";
+            if (string.Equals(name, "Graphite", StringComparison.OrdinalIgnoreCase)) return "Graphite";
+            if (string.Equals(name, "Rose", StringComparison.OrdinalIgnoreCase)) return "Rose";
+            return "Graphite";
+        }
 
         public static MonitorTheme Get(string name)
         {
-            if (string.Equals(name, "Traffic Blue", StringComparison.OrdinalIgnoreCase))
+            name = NormalizeName(name);
+            if (string.Equals(name, "Emerald", StringComparison.OrdinalIgnoreCase))
             {
                 return new MonitorTheme {
-                    Name = "Traffic Blue",
-                    BackTop = Color.FromArgb(14, 24, 43),
-                    BackBottom = Color.FromArgb(18, 52, 88),
-                    PanelTop = Color.FromArgb(18, 29, 49),
-                    PanelBottom = Color.FromArgb(12, 41, 72),
-                    WaterTop = Color.FromArgb(138, 204, 255),
-                    WaterBottom = Color.FromArgb(43, 111, 202),
-                    Accent = Color.FromArgb(116, 190, 255),
+                    Name = "Emerald",
+                    BackTop = Color.FromArgb(244, 251, 248),
+                    BackBottom = Color.FromArgb(230, 246, 240),
+                    PanelTop = Color.White,
+                    PanelBottom = Color.FromArgb(238, 248, 244),
+                    WaterTop = Color.FromArgb(60, 207, 168),
+                    WaterBottom = Color.FromArgb(14, 143, 121),
+                    Accent = Color.FromArgb(14, 143, 121),
                     CountdownSafe = CountdownSafeColor,
-                    Text = Color.White,
-                    Muted = Color.FromArgb(210, 220, 234, 248),
-                    RingBase = Color.FromArgb(62, 174, 205, 236)
+                    Text = Color.FromArgb(23, 42, 40),
+                    Muted = Color.FromArgb(83, 106, 102),
+                    RingBase = Color.FromArgb(160, 196, 221, 214),
+                    StandardBack = Color.FromArgb(244, 251, 248),
+                    StandardSurface = Color.White,
+                    StandardTableHeader = Color.FromArgb(238, 248, 244),
+                    StandardBorder = Color.FromArgb(213, 233, 223),
+                    StandardText = Color.FromArgb(23, 42, 40),
+                    StandardMuted = Color.FromArgb(83, 106, 102),
+                    StandardAccent = Color.FromArgb(14, 143, 121),
+                    StandardProgressTrack = Color.FromArgb(221, 232, 227)
                 };
             }
-            if (string.Equals(name, "Minimal Dark", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, "Violet", StringComparison.OrdinalIgnoreCase))
             {
                 return new MonitorTheme {
-                    Name = "Minimal Dark",
-                    BackTop = Color.FromArgb(17, 18, 21),
-                    BackBottom = Color.FromArgb(30, 31, 35),
-                    PanelTop = Color.FromArgb(23, 24, 28),
-                    PanelBottom = Color.FromArgb(13, 14, 17),
-                    WaterTop = Color.FromArgb(190, 197, 205),
-                    WaterBottom = Color.FromArgb(82, 92, 104),
-                    Accent = Color.FromArgb(196, 204, 214),
+                    Name = "Violet",
+                    BackTop = Color.FromArgb(248, 246, 255),
+                    BackBottom = Color.FromArgb(240, 236, 253),
+                    PanelTop = Color.White,
+                    PanelBottom = Color.FromArgb(244, 241, 253),
+                    WaterTop = Color.FromArgb(164, 135, 255),
+                    WaterBottom = Color.FromArgb(122, 79, 232),
+                    Accent = Color.FromArgb(122, 79, 232),
                     CountdownSafe = CountdownSafeColor,
-                    Text = Color.FromArgb(248, 250, 252),
-                    Muted = Color.FromArgb(204, 206, 214, 222),
-                    RingBase = Color.FromArgb(58, 195, 202, 210)
+                    Text = Color.FromArgb(32, 27, 51),
+                    Muted = Color.FromArgb(94, 88, 113),
+                    RingBase = Color.FromArgb(160, 197, 190, 232),
+                    StandardBack = Color.FromArgb(248, 246, 255),
+                    StandardSurface = Color.White,
+                    StandardTableHeader = Color.FromArgb(244, 241, 253),
+                    StandardBorder = Color.FromArgb(222, 215, 243),
+                    StandardText = Color.FromArgb(32, 27, 51),
+                    StandardMuted = Color.FromArgb(94, 88, 113),
+                    StandardAccent = Color.FromArgb(122, 79, 232),
+                    StandardProgressTrack = Color.FromArgb(228, 224, 238)
                 };
             }
-            if (string.Equals(name, "Warm Amber", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, "Graphite", StringComparison.OrdinalIgnoreCase))
             {
                 return new MonitorTheme {
-                    Name = "Warm Amber",
-                    BackTop = Color.FromArgb(35, 28, 36),
-                    BackBottom = Color.FromArgb(76, 46, 68),
-                    PanelTop = Color.FromArgb(41, 33, 42),
-                    PanelBottom = Color.FromArgb(66, 41, 58),
-                    WaterTop = Color.FromArgb(213, 186, 255),
-                    WaterBottom = Color.FromArgb(129, 88, 199),
-                    Accent = Color.FromArgb(191, 156, 255),
+                    Name = "Graphite",
+                    BackTop = Color.FromArgb(247, 248, 250),
+                    BackBottom = Color.FromArgb(238, 242, 247),
+                    PanelTop = Color.White,
+                    PanelBottom = Color.FromArgb(244, 246, 248),
+                    WaterTop = Color.FromArgb(114, 165, 244),
+                    WaterBottom = Color.FromArgb(43, 103, 216),
+                    Accent = Color.FromArgb(43, 103, 216),
                     CountdownSafe = CountdownSafeColor,
-                    Text = Color.White,
-                    Muted = Color.FromArgb(214, 232, 220, 244),
-                    RingBase = Color.FromArgb(58, 218, 200, 236)
+                    Text = Color.FromArgb(25, 34, 51),
+                    Muted = Color.FromArgb(89, 101, 121),
+                    RingBase = Color.FromArgb(160, 190, 202, 220),
+                    StandardBack = Color.FromArgb(247, 248, 250),
+                    StandardSurface = Color.White,
+                    StandardTableHeader = Color.FromArgb(244, 246, 248),
+                    StandardBorder = Color.FromArgb(218, 223, 236),
+                    StandardText = Color.FromArgb(25, 34, 51),
+                    StandardMuted = Color.FromArgb(89, 101, 121),
+                    StandardAccent = Color.FromArgb(43, 103, 216),
+                    StandardProgressTrack = Color.FromArgb(221, 227, 236)
                 };
             }
-            return new MonitorTheme {
-                Name = "Traffic Classic",
-                BackTop = Color.FromArgb(15, 25, 27),
-                BackBottom = Color.FromArgb(9, 76, 72),
-                PanelTop = Color.FromArgb(20, 31, 33),
-                PanelBottom = Color.FromArgb(8, 64, 61),
-                WaterTop = Color.FromArgb(132, 232, 224),
-                WaterBottom = Color.FromArgb(34, 164, 156),
-                Accent = Color.FromArgb(154, 220, 214),
-                CountdownSafe = CountdownSafeColor,
-                Text = Color.White,
-                Muted = Color.FromArgb(210, 224, 238, 234),
-                RingBase = Color.FromArgb(66, 197, 220, 216)
-            };
+            if (string.Equals(name, "Rose", StringComparison.OrdinalIgnoreCase))
+            {
+                return new MonitorTheme {
+                    Name = "Rose",
+                    BackTop = Color.FromArgb(255, 247, 248),
+                    BackBottom = Color.FromArgb(255, 239, 242),
+                    PanelTop = Color.White,
+                    PanelBottom = Color.FromArgb(255, 243, 245),
+                    WaterTop = Color.FromArgb(239, 119, 145),
+                    WaterBottom = Color.FromArgb(216, 77, 109),
+                    Accent = Color.FromArgb(216, 77, 109),
+                    CountdownSafe = CountdownSafeColor,
+                    Text = Color.FromArgb(44, 27, 37),
+                    Muted = Color.FromArgb(107, 86, 96),
+                    RingBase = Color.FromArgb(160, 225, 190, 203),
+                    StandardBack = Color.FromArgb(255, 247, 248),
+                    StandardSurface = Color.White,
+                    StandardTableHeader = Color.FromArgb(255, 243, 245),
+                    StandardBorder = Color.FromArgb(241, 213, 220),
+                    StandardText = Color.FromArgb(44, 27, 37),
+                    StandardMuted = Color.FromArgb(107, 86, 96),
+                    StandardAccent = Color.FromArgb(216, 77, 109),
+                    StandardProgressTrack = Color.FromArgb(235, 221, 225)
+                };
+            }
+            return Get("Graphite");
         }
     }
 
@@ -3135,7 +3324,6 @@ namespace CodexFloat
         public event EventHandler RefreshRequested;
         public event EventHandler SettingsRequested;
         public event EventHandler TrustedEnvironmentsRequested;
-        public event EventHandler ResetPositionRequested;
         public event EventHandler HelpRequested;
         public event EventHandler ErrorLogRequested;
         public event EventHandler AboutRequested;
@@ -3148,10 +3336,12 @@ namespace CodexFloat
         private readonly WinFormsTimer rotateTimer = new WinFormsTimer();
         private readonly WinFormsTimer waveTimer = new WinFormsTimer();
         private readonly WinFormsTimer autoCollapseTimer = new WinFormsTimer();
-        private readonly Size miniSize = new Size(96, 96);
-        private readonly Size loadingMiniSize = new Size(96, 114);
+        private readonly WinFormsTimer resetCardPageTimer = new WinFormsTimer();
+        private readonly Size miniSize = new Size(112, 112);
+        private readonly Size loadingMiniSize = new Size(112, 130);
         private const int LoadingTextPad = 18;
-        private readonly Size detailSize = new Size(500, 330);
+        private static readonly Size StandardDetailSize = new Size(600, 390);
+        private static readonly Size MiniDetailSize = new Size(360, 180);
         private ToolStripMenuItem detailMenuItem;
         private ToolStripMenuItem autoStartMenuItem;
         private ToolStripMenuItem topMostMenuItem;
@@ -3161,6 +3351,7 @@ namespace CodexFloat
         private MonitorConfig behaviorConfig = new MonitorConfig();
         private MonitorSnapshot snapshot = MonitorSnapshot.Loading();
         private MonitorTheme theme = ThemePalette.Get("Traffic Classic");
+        private string expandedUiStyle = ExpandedUiStyleOptions.Standard;
         private string statusText = "";
         private int messageIndex;
         private float wavePhase;
@@ -3174,6 +3365,16 @@ namespace CodexFloat
         private bool mouseClickThrough;
         private bool lockPosition;
         private byte layerOpacity = 255;
+        private int resetCardPage;
+        private DateTime resetCardAutoResumeAt = DateTime.MinValue;
+        private Rectangle resetCardPrevBounds = Rectangle.Empty;
+        private Rectangle resetCardNextBounds = Rectangle.Empty;
+        private int resetCardPressedDirection;
+        private int detailPage;
+        private int detailPressedTab = -1;
+        private Rectangle detailDashboardTabBounds = Rectangle.Empty;
+        private Rectangle detailResetCardsTabBounds = Rectangle.Empty;
+        private ExpandedDetailForm expandedDetailForm;
 
         public MiniBarForm()
         {
@@ -3217,6 +3418,17 @@ namespace CodexFloat
                     this.Collapse();
                 }
             };
+
+            this.resetCardPageTimer.Interval = 4200;
+            this.resetCardPageTimer.Tick += delegate {
+                if (!this.expanded || this.snapshot == null || this.snapshot.ErrorMessage != null) return;
+                if (DateTime.Now < this.resetCardAutoResumeAt) return;
+                var pageCount = this.ResetCardPageCount();
+                if (pageCount <= 1) return;
+                this.resetCardPage = (this.resetCardPage + 1) % pageCount;
+                this.Invalidate();
+            };
+            this.resetCardPageTimer.Start();
         }
 
         protected override CreateParams CreateParams
@@ -3256,21 +3468,40 @@ namespace CodexFloat
             this.behaviorConfig.ScrollShowGpt55High = cfg.ScrollShowGpt55High;
             this.behaviorConfig.ScrollShowGpt55Medium = cfg.ScrollShowGpt55Medium;
             this.behaviorConfig.ScrollShowGpt54XHigh = cfg.ScrollShowGpt54XHigh;
+            this.behaviorConfig.ScrollShowGpt56LunaMedium = cfg.ScrollShowGpt56LunaMedium;
             this.behaviorConfig.EnvironmentCheckOnStartup = cfg.EnvironmentCheckOnStartup;
             this.behaviorConfig.EnvironmentConfirmMediumRiskOnManualRefresh = cfg.EnvironmentConfirmMediumRiskOnManualRefresh;
             this.behaviorConfig.EnvironmentRecheckHighRiskOnManualRefresh = cfg.EnvironmentRecheckHighRiskOnManualRefresh;
+            this.behaviorConfig.ExpandedUiStyle = ExpandedUiStyleOptions.Normalize(cfg.ExpandedUiStyle);
+            this.SetExpandedUiStyle(this.behaviorConfig.ExpandedUiStyle);
             this.TopMost = cfg.AlwaysOnTop;
             this.Opacity = 1.0;
             this.layerOpacity = (byte)Math.Max(89, Math.Min(255, (int)Math.Round(255.0 * Math.Max(35, Math.Min(100, cfg.OpacityPercent)) / 100.0)));
             this.lockPosition = cfg.LockPosition;
             this.Cursor = this.lockPosition ? Cursors.Hand : Cursors.SizeAll;
             this.UpdateBehaviorMenuChecks();
+            if (this.expandedDetailForm != null)
+            {
+                this.expandedDetailForm.TopMost = this.TopMost;
+                this.expandedDetailForm.Opacity = this.layerOpacity / 255.0;
+            }
             if (this.mouseClickThrough != cfg.MouseClickThrough)
             {
                 this.mouseClickThrough = cfg.MouseClickThrough;
                 if (this.IsHandleCreated) this.RecreateHandle();
             }
             this.UpdateLayeredSurface();
+        }
+
+        public void SetExpandedUiStyle(string styleName)
+        {
+            var next = ExpandedUiStyleOptions.Normalize(styleName);
+            if (string.Equals(this.expandedUiStyle, next, StringComparison.OrdinalIgnoreCase)) return;
+            this.expandedUiStyle = next;
+            this.behaviorConfig.ExpandedUiStyle = next;
+            this.resetCardPage = 0;
+            if (this.expanded) this.ResizeKeepingCenter(this.CurrentDetailSize());
+            this.Invalidate();
         }
 
         public void SetInitialLocation(int? x, int? y)
@@ -3302,6 +3533,8 @@ namespace CodexFloat
         {
             this.snapshot = snapshot ?? MonitorSnapshot.Loading();
             if (this.messageIndex >= this.ScrollItems().Count) this.messageIndex = 0;
+            this.ClampResetCardPage();
+            if (this.expandedDetailForm != null) this.expandedDetailForm.SetSnapshot(this.snapshot);
             this.Invalidate();
         }
 
@@ -3309,6 +3542,7 @@ namespace CodexFloat
         {
             this.theme = ThemePalette.Get(themeName);
             this.UpdateThemeChecks();
+            if (this.expandedDetailForm != null) this.expandedDetailForm.SetTheme(this.theme);
             this.Invalidate();
         }
 
@@ -3322,6 +3556,7 @@ namespace CodexFloat
             this.UpdateThemeChecks();
             this.UpdateBehaviorMenuChecks();
             this.UpdateDetailMenuText();
+            if (this.expandedDetailForm != null) this.expandedDetailForm.SetLanguage();
             this.Invalidate();
         }
 
@@ -3333,7 +3568,8 @@ namespace CodexFloat
 
         public bool ContainsCursor()
         {
-            return this.Visible && this.ClientRectangle.Contains(this.PointToClient(Cursor.Position));
+            if (this.Visible && this.ClientRectangle.Contains(this.PointToClient(Cursor.Position))) return true;
+            return this.expandedDetailForm != null && this.expandedDetailForm.ContainsCursor();
         }
 
         private Rectangle CurrentScreenBounds()
@@ -3455,11 +3691,7 @@ namespace CodexFloat
             menu.Items.Add(this.BuildScrollDataMenu());
             menu.Items.Add(this.BuildLanguageMenu());
             menu.Items.Add(T.Text("设置"), null, delegate { Raise(this.SettingsRequested); });
-            menu.Items.Add(T.Text("重置悬浮窗位置"), null, delegate { Raise(this.ResetPositionRequested); });
-            menu.Items.Add(T.Text("帮助"), null, delegate { Raise(this.HelpRequested); });
-            menu.Items.Add(T.Text("关于"), null, delegate { Raise(this.AboutRequested); });
-            menu.Items.Add(T.Text("检查更新"), null, delegate { Raise(this.CheckUpdatesRequested); });
-            menu.Items.Add(T.Text("查看错误日志"), null, delegate { Raise(this.ErrorLogRequested); });
+            menu.Items.Add(this.BuildHelpMenu());
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(T.Text("退出"), null, delegate { Raise(this.ExitRequested); });
             MenuDropDownPlacer.Attach(menu, this.CurrentScreenBounds);
@@ -3516,10 +3748,22 @@ namespace CodexFloat
             root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_high"), "gpt55high", this.behaviorConfig.ScrollShowGpt55High));
             root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_55_medium"), "gpt55medium", this.behaviorConfig.ScrollShowGpt55Medium));
             root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_54_xhigh"), "gpt54xhigh", this.behaviorConfig.ScrollShowGpt54XHigh));
+            root.DropDownItems.Add(this.BuildScrollToggle(T.Text("scroll_gpt_56_luna_medium"), "gpt56lunamedium", this.behaviorConfig.ScrollShowGpt56LunaMedium));
             root.DropDownOpening += delegate {
                 this.UpdateScrollMenuChecks(root);
                 MenuDropDownPlacer.AttachChildren(root, this.CurrentScreenBounds);
             };
+            return root;
+        }
+
+        private ToolStripMenuItem BuildHelpMenu()
+        {
+            var root = new ToolStripMenuItem(T.Text("帮助"));
+            root.DropDownItems.Add(T.Text("帮助"), null, delegate { Raise(this.HelpRequested); });
+            root.DropDownItems.Add(T.Text("关于"), null, delegate { Raise(this.AboutRequested); });
+            root.DropDownItems.Add(T.Text("检查更新"), null, delegate { Raise(this.CheckUpdatesRequested); });
+            root.DropDownItems.Add(T.Text("查看错误日志"), null, delegate { Raise(this.ErrorLogRequested); });
+            root.DropDownOpening += delegate { MenuDropDownPlacer.AttachChildren(root, this.CurrentScreenBounds); };
             return root;
         }
 
@@ -3545,6 +3789,7 @@ namespace CodexFloat
                     case "gpt55high": item.Checked = this.behaviorConfig.ScrollShowGpt55High; break;
                     case "gpt55medium": item.Checked = this.behaviorConfig.ScrollShowGpt55Medium; break;
                     case "gpt54xhigh": item.Checked = this.behaviorConfig.ScrollShowGpt54XHigh; break;
+                    case "gpt56lunamedium": item.Checked = this.behaviorConfig.ScrollShowGpt56LunaMedium; break;
                 }
             }
         }
@@ -3617,6 +3862,7 @@ namespace CodexFloat
                 case "gpt55high": this.behaviorConfig.ScrollShowGpt55High = !this.behaviorConfig.ScrollShowGpt55High; break;
                 case "gpt55medium": this.behaviorConfig.ScrollShowGpt55Medium = !this.behaviorConfig.ScrollShowGpt55Medium; break;
                 case "gpt54xhigh": this.behaviorConfig.ScrollShowGpt54XHigh = !this.behaviorConfig.ScrollShowGpt54XHigh; break;
+                case "gpt56lunamedium": this.behaviorConfig.ScrollShowGpt56LunaMedium = !this.behaviorConfig.ScrollShowGpt56LunaMedium; break;
             }
             this.messageIndex = 0;
             this.RaiseBehaviorChanged();
@@ -3695,6 +3941,21 @@ namespace CodexFloat
         private void OnMouseDownDrag(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
+            if (this.expanded)
+            {
+                var tab = this.HitDetailTab(e.Location);
+                if (tab >= 0)
+                {
+                    this.detailPressedTab = tab;
+                    return;
+                }
+                var resetCardDirection = this.HitResetCardNavigation(e.Location);
+                if (resetCardDirection != 0)
+                {
+                    this.resetCardPressedDirection = resetCardDirection;
+                    return;
+                }
+            }
             this.dragging = true;
             this.movedWhileDragging = false;
             this.dragStartMouse = Cursor.Position;
@@ -3703,6 +3964,12 @@ namespace CodexFloat
 
         private void OnMouseMoveDrag(object sender, MouseEventArgs e)
         {
+            if (this.expanded && !this.dragging)
+            {
+                this.Cursor = this.HitDetailTab(e.Location) < 0 && this.HitResetCardNavigation(e.Location) == 0
+                    ? (this.lockPosition ? Cursors.Hand : Cursors.SizeAll)
+                    : Cursors.Hand;
+            }
             if (!this.dragging || this.lockPosition) return;
             var dx = Cursor.Position.X - this.dragStartMouse.X;
             var dy = Cursor.Position.Y - this.dragStartMouse.Y;
@@ -3713,6 +3980,28 @@ namespace CodexFloat
 
         private void OnMouseUpDrag(object sender, MouseEventArgs e)
         {
+            if (this.detailPressedTab >= 0)
+            {
+                var pressed = this.detailPressedTab;
+                this.detailPressedTab = -1;
+                if (e.Button == MouseButtons.Left && this.HitDetailTab(e.Location) == pressed)
+                {
+                    this.detailPage = pressed;
+                    this.ClampResetCardPage();
+                    this.Invalidate();
+                }
+                return;
+            }
+            if (this.resetCardPressedDirection != 0)
+            {
+                var pressed = this.resetCardPressedDirection;
+                this.resetCardPressedDirection = 0;
+                if (e.Button == MouseButtons.Left && this.HitResetCardNavigation(e.Location) == pressed)
+                {
+                    this.MoveResetCardPage(pressed);
+                }
+                return;
+            }
             if (!this.dragging) return;
             this.dragging = false;
             if (this.movedWhileDragging && this.LocationSaved != null)
@@ -3729,16 +4018,49 @@ namespace CodexFloat
         {
             if (this.expanded) return;
             this.expanded = true;
-            this.ResizeKeepingCenter(this.detailSize);
+            this.ShowExpandedDetailWindow();
             this.UpdateDetailMenuText();
         }
 
         private void Collapse()
         {
             if (!this.expanded) return;
+            var miniLocation = this.LocationForSave();
             this.expanded = false;
-            this.ResizeKeepingCenter(this.CurrentMiniSize());
+            if (this.expandedDetailForm != null)
+            {
+                this.expandedDetailForm.Hide();
+            }
+            this.ResizeMiniForState(miniLocation);
+            this.Show();
+            this.BringToFront();
             this.UpdateDetailMenuText();
+        }
+
+        private void ShowExpandedDetailWindow()
+        {
+            if (this.expandedDetailForm == null || this.expandedDetailForm.IsDisposed)
+            {
+                this.expandedDetailForm = new ExpandedDetailForm(this.ContextMenuStrip);
+                this.expandedDetailForm.CollapseRequested += delegate { this.Collapse(); };
+                this.expandedDetailForm.MouseLeftExpanded += delegate { this.QueueAutoCollapse(); };
+            }
+
+            this.expandedDetailForm.SetSnapshot(this.snapshot);
+            this.expandedDetailForm.SetTheme(this.theme);
+            this.expandedDetailForm.SetLanguage();
+            this.expandedDetailForm.TopMost = this.TopMost;
+            this.expandedDetailForm.Opacity = this.layerOpacity / 255.0;
+
+            var center = new Point(this.Left + this.Width / 2, this.Top + this.Height / 2);
+            var area = this.WorkingAreaForPoint(center);
+            var size = this.CurrentDetailSize();
+            var x = center.X - size.Width / 2;
+            var y = center.Y - size.Height / 2;
+            this.expandedDetailForm.Bounds = new Rectangle(this.ClampLocation(x, y, size, area, 4), size);
+            this.Hide();
+            this.expandedDetailForm.Show();
+            this.expandedDetailForm.BringToFront();
         }
 
         private void ToggleDetails()
@@ -3747,6 +4069,51 @@ namespace CodexFloat
             if (this.expanded) this.Collapse();
             else this.Expand();
             this.BringToFront();
+        }
+
+        private int ResetCardPageCount()
+        {
+            var count = this.snapshot == null || this.snapshot.ResetCards == null ? 0 : this.snapshot.ResetCards.Expirations.Count;
+            if (count <= 0) return 1;
+            var pageSize = this.ResetCardPageSize();
+            return (count + pageSize - 1) / pageSize;
+        }
+
+        private int ResetCardPageSize()
+        {
+            return this.detailPage == 1 ? 6 : 1;
+        }
+
+        private void ClampResetCardPage()
+        {
+            var pageCount = this.ResetCardPageCount();
+            if (this.resetCardPage < 0) this.resetCardPage = 0;
+            if (this.resetCardPage >= pageCount) this.resetCardPage = pageCount - 1;
+        }
+
+        private int HitResetCardNavigation(Point point)
+        {
+            if (!this.expanded || this.ResetCardPageCount() <= 1) return 0;
+            if (!this.resetCardPrevBounds.IsEmpty && this.resetCardPrevBounds.Contains(point)) return -1;
+            if (!this.resetCardNextBounds.IsEmpty && this.resetCardNextBounds.Contains(point)) return 1;
+            return 0;
+        }
+
+        private int HitDetailTab(Point point)
+        {
+            if (!this.expanded) return -1;
+            if (!this.detailDashboardTabBounds.IsEmpty && this.detailDashboardTabBounds.Contains(point)) return 0;
+            if (!this.detailResetCardsTabBounds.IsEmpty && this.detailResetCardsTabBounds.Contains(point)) return 1;
+            return -1;
+        }
+
+        private void MoveResetCardPage(int direction)
+        {
+            var pageCount = this.ResetCardPageCount();
+            if (pageCount <= 1) return;
+            this.resetCardPage = (this.resetCardPage + direction + pageCount) % pageCount;
+            this.resetCardAutoResumeAt = DateTime.Now.AddSeconds(9);
+            this.Invalidate();
         }
 
         private void QueueAutoCollapse()
@@ -3767,12 +4134,23 @@ namespace CodexFloat
             {
                 return new Point(this.Left, this.Top + this.MiniTopPad());
             }
+            if (this.expandedDetailForm != null && !this.expandedDetailForm.IsDisposed)
+            {
+                return new Point(
+                    this.expandedDetailForm.Left + (this.expandedDetailForm.Width - this.miniSize.Width) / 2,
+                    this.expandedDetailForm.Top + (this.expandedDetailForm.Height - this.miniSize.Height) / 2);
+            }
             return new Point(this.Left + (this.Width - this.miniSize.Width) / 2, this.Top + (this.Height - this.miniSize.Height) / 2);
         }
 
         private Size CurrentMiniSize()
         {
             return this.refreshing ? this.loadingMiniSize : this.miniSize;
+        }
+
+        private Size CurrentDetailSize()
+        {
+            return StandardDetailSize;
         }
 
         private int MiniTopPad()
@@ -3847,13 +4225,17 @@ namespace CodexFloat
         private List<string> ScrollItems()
         {
             var items = new List<string>();
-            if (this.behaviorConfig.ScrollShowFiveHour) items.Add("5h");
-            if (this.behaviorConfig.ScrollShowWeekly) items.Add("weekly");
+            var usage = this.snapshot == null ? null : this.snapshot.Usage;
+            var fiveHourAvailable = usage != null && usage.FiveHour != null && usage.FiveHour.Available;
+            var weeklyAvailable = usage != null && usage.Weekly != null && usage.Weekly.Available;
+            if (this.behaviorConfig.ScrollShowFiveHour && fiveHourAvailable) items.Add("5h");
+            if (this.behaviorConfig.ScrollShowWeekly && weeklyAvailable) items.Add("weekly");
             if (this.behaviorConfig.ScrollShowGpt55XHigh) items.Add("iq0");
             if (this.behaviorConfig.ScrollShowGpt55High) items.Add("iq1");
             if (this.behaviorConfig.ScrollShowGpt55Medium) items.Add("iq2");
             if (this.behaviorConfig.ScrollShowGpt54XHigh) items.Add("iq3");
-            if (items.Count == 0) items.Add("5h");
+            if (this.behaviorConfig.ScrollShowGpt56LunaMedium) items.Add("iq4");
+            if (items.Count == 0) items.Add(weeklyAvailable ? "weekly" : "5h");
             return items;
         }
 
@@ -3865,6 +4247,7 @@ namespace CodexFloat
                 case "iq1": index = 1; break;
                 case "iq2": index = 2; break;
                 case "iq3": index = 3; break;
+                case "iq4": index = 4; break;
                 default: index = 0; break;
             }
             var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
@@ -3914,23 +4297,37 @@ namespace CodexFloat
 
             var usage = this.CurrentUsage();
             var pct = usage.Available ? usage.RemainingPercent : 0.0;
-            var waterCircle = new Rectangle(12, 12, 72, 72);
+            var waterCircle = new Rectangle(14, 14, this.Width - 28, this.Height - 28);
             this.DrawWater(g, waterCircle, pct);
             this.DrawMiniCountdownRing(g, usage);
 
-            this.DrawMiniText(g, usage.Label, new Font("Segoe UI Semibold", 10f), this.theme.Muted, new RectangleF(0, 15, this.Width, 18));
-            this.DrawMiniText(g, usage.Available ? pct.ToString("0", CultureInfo.InvariantCulture) + "%" : "--", new Font("Segoe UI Semibold", 19f), this.theme.Text, new RectangleF(0, 29, this.Width, 38));
-            this.DrawMiniText(g, this.ShortResetText(usage), new Font("Segoe UI", 7.7f), this.theme.Muted, new RectangleF(0, 65, this.Width, 15));
+            this.DrawMiniWaterText(g, usage.Label, new Font("Segoe UI Semibold", 11f), pct, waterCircle, new RectangleF(0, 17, this.Width, 20));
+            this.DrawMiniWaterText(g, usage.Available ? pct.ToString("0", CultureInfo.InvariantCulture) + "%" : "--", new Font("Segoe UI Semibold", 22f), pct, waterCircle, new RectangleF(0, 36, this.Width, 34));
+            this.DrawMiniWaterText(g, this.ShortResetText(usage), new Font("Segoe UI", 9f), pct, waterCircle, new RectangleF(0, 78, this.Width, 18));
         }
 
         private void DrawMiniIq(Graphics g, ModelIqScore score)
         {
             this.DrawMiniIqRing(g);
-            var label = score == null ? "--" : score.Label;
-            if (label.StartsWith("GPT-", StringComparison.OrdinalIgnoreCase)) label = label.Substring(4);
-            this.DrawMiniText(g, "IQ", new Font("Segoe UI Semibold", 9.5f), this.theme.Muted, new RectangleF(0, 16, this.Width, 17));
-            this.DrawMiniText(g, score != null && score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", new Font("Segoe UI Semibold", 19f), this.theme.Text, new RectangleF(0, 29, this.Width, 38));
-            this.DrawMiniText(g, label, new Font("Segoe UI", 7.4f), this.theme.Muted, new RectangleF(3, 65, this.Width - 6, 15));
+            string model;
+            string effort;
+            MiniIqLabelLines(score, out model, out effort);
+            this.DrawMiniText(g, "IQ", new Font("Segoe UI Semibold", 10.5f), this.theme.Muted, new RectangleF(0, 17, this.Width, 18));
+            this.DrawMiniText(g, score != null && score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", new Font("Segoe UI Semibold", 22f), this.theme.Text, new RectangleF(0, 35, this.Width, 35));
+            this.DrawMiniText(g, model, new Font("Segoe UI Semibold", 8.6f), this.theme.Muted, new RectangleF(8, 73, this.Width - 16, 15));
+            this.DrawMiniText(g, effort, new Font("Segoe UI", 8.6f), this.theme.Muted, new RectangleF(8, 88, this.Width - 16, 15));
+        }
+
+        private static void MiniIqLabelLines(ModelIqScore score, out string model, out string effort)
+        {
+            var label = score == null ? "" : score.Label;
+            if (string.Equals(label, "GPT-5.6-Sol-ultra", StringComparison.OrdinalIgnoreCase)) { model = "Sol"; effort = "Ultra"; return; }
+            if (string.Equals(label, "GPT-5.6-Sol-medium", StringComparison.OrdinalIgnoreCase)) { model = "Sol"; effort = "Medium"; return; }
+            if (string.Equals(label, "GPT-5.6-Sol-low", StringComparison.OrdinalIgnoreCase)) { model = "Sol"; effort = "Low"; return; }
+            if (string.Equals(label, "GPT-5.6-Terra-medium", StringComparison.OrdinalIgnoreCase)) { model = "Terra"; effort = "Medium"; return; }
+            if (string.Equals(label, "GPT-5.6-Luna-medium", StringComparison.OrdinalIgnoreCase)) { model = "Luna"; effort = "Medium"; return; }
+            model = string.IsNullOrWhiteSpace(label) ? "--" : label;
+            effort = "";
         }
 
         private void DrawMiniIqRing(Graphics g)
@@ -4104,103 +4501,1064 @@ namespace CodexFloat
         private void DrawDetail(Graphics g)
         {
             var bounds = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
-            using (var path = RoundRect(bounds, 24))
-            using (var bg = new LinearGradientBrush(bounds, this.theme.PanelTop, this.theme.PanelBottom, 90f))
+            using (var path = RoundRect(bounds, 10))
+            using (var bg = new SolidBrush(this.theme.StandardSurface))
             {
                 g.FillPath(bg, path);
             }
-            using (var pen = new Pen(Color.FromArgb(105, 255, 255, 255)))
-            using (var path = RoundRect(bounds, 24))
+            using (var pen = new Pen(this.theme.StandardBorder))
+            using (var path = RoundRect(bounds, 10))
             {
                 g.DrawPath(pen, path);
             }
 
-            using (var accent = new SolidBrush(this.theme.Accent))
-            using (var titleFont = new Font("Segoe UI Semibold", 12f))
-            using (var topUpdateFont = new Font("Segoe UI", 9f))
-            using (var bodyFont = new Font("Segoe UI Semibold", 11.2f))
-            using (var smallFont = new Font("Segoe UI Semibold", 9.8f))
-            using (var titleTextBrush = new SolidBrush(this.theme.Text))
-            using (var topMutedBrush = new SolidBrush(this.theme.Muted))
-            using (var detailTextBrush = new SolidBrush(EmphasizeDetailTextColor(this.theme.Text)))
-            using (var muted = new SolidBrush(EmphasizeDetailMutedColor(this.theme.Muted, this.theme.Text)))
+            this.DrawDesignHeader(g);
+            this.DrawDesignTabs(g);
+
+            if (this.snapshot.ErrorMessage != null)
             {
-                var contentWidth = 424;
-                var contentLeft = (this.Width - contentWidth) / 2;
-                var titleText = T.Text("详情标题");
-                g.FillEllipse(accent, 20, 22, 10, 10);
-                this.SafeDrawString(g, titleText, titleFont, titleTextBrush, new RectangleF(38, 14, this.Width - 230, 24));
-                this.SafeDrawString(g, T.Text("更新") + " " + this.snapshot.UpdatedAt.ToString("HH:mm:ss"), topUpdateFont, topMutedBrush, new RectangleF(this.Width - 168, 18, 140, 18), StringAlignment.Far);
-                if (this.behaviorConfig.ShowUserNameInDetails && !string.IsNullOrWhiteSpace(this.snapshot.Usage.UserName))
-                {
-                    this.SafeDrawString(g, T.Text("账户标签") + " " + this.snapshot.Usage.UserName, smallFont, muted, new RectangleF(38, 38, this.Width - 76, 18));
-                }
+                this.DrawDesignError(g);
+                return;
+            }
 
-                if (this.snapshot.ErrorMessage != null)
-                {
-                    this.SafeDrawString(g, T.Text("连接失败"), bodyFont, detailTextBrush, new RectangleF(contentLeft, 68, contentWidth, 24));
-                    this.SafeDrawString(g, this.snapshot.ErrorMessage, bodyFont, detailTextBrush, new RectangleF(contentLeft, 94, contentWidth, 24));
-                    this.SafeDrawString(g, T.Text("错误代码") + ": " + (this.snapshot.ErrorCode ?? "--"), smallFont, muted, new RectangleF(contentLeft, 118, contentWidth, 20));
-                    this.SafeDrawString(g, Trim(this.snapshot.ErrorDetail ?? "", 150), smallFont, muted, new RectangleF(contentLeft, 144, contentWidth, 80));
-                    this.SafeDrawString(g, T.Text("查看错误日志提示"), smallFont, detailTextBrush, new RectangleF(0, 238, this.Width, 18), true);
-                    return;
-                }
+            if (this.detailPage == 1) this.DrawResetCardsDesignPage(g);
+            else this.DrawDashboardDesignPage(g);
+        }
 
-                var leftCircle = new Rectangle(contentLeft + 20, 86, 112, 112);
-                var usageX = contentLeft + 164;
-                var usageBarWidth = contentWidth - 164;
-                this.DrawWater(g, leftCircle, this.CurrentUsage().RemainingPercent);
-                using (var baseRing = new Pen(Color.FromArgb(46, 255, 255, 255), 7f))
+        private void DrawMiniStyleDetail(Graphics g)
+        {
+            var bounds = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
+            using (var path = RoundRect(bounds, 12))
+            using (var border = new Pen(this.MiniBorderColor()))
+            {
+                if (this.IsMiniDarkStyle())
                 {
-                    baseRing.StartCap = LineCap.Round;
-                    baseRing.EndCap = LineCap.Round;
-                    g.DrawEllipse(baseRing, leftCircle.Left - 5.5f, leftCircle.Top - 5.5f, leftCircle.Width + 11f, leftCircle.Height + 11f);
-                }
-                using (var ring = new Pen(this.CountdownColor(this.CurrentUsage()), 7f))
-                {
-                    ring.StartCap = LineCap.Round;
-                    ring.EndCap = LineCap.Round;
-                    ring.LineJoin = LineJoin.Round;
-                    g.DrawArc(ring, leftCircle.Left - 5.5f, leftCircle.Top - 5.5f, leftCircle.Width + 11f, leftCircle.Height + 11f, -90, (float)(360.0 * this.ResetRatio(this.CurrentUsage())));
-                }
-                this.DrawCenteredText(g, this.CurrentUsage().Label, new Font("Segoe UI Semibold", 11f), this.theme.Muted, new RectangleF(leftCircle.Left, leftCircle.Top + 22, leftCircle.Width, 22));
-                this.DrawCenteredText(g, this.CurrentUsage().RemainingPercent.ToString("0", CultureInfo.InvariantCulture) + "%", new Font("Segoe UI Semibold", 24f), this.theme.Text, new RectangleF(leftCircle.Left, leftCircle.Top + 46, leftCircle.Width, 38));
-
-                var y = 86;
-                this.DrawUsageLine(g, this.snapshot.Usage.FiveHour, usageX, y, usageBarWidth, bodyFont, smallFont, false); y += 55;
-                this.DrawUsageLine(g, this.snapshot.Usage.Weekly, usageX, y, usageBarWidth, bodyFont, smallFont, true); y += 61;
-
-                var cardX = contentLeft;
-                var cardWidth = contentWidth;
-                var cardCount = Math.Max(1, this.snapshot.ResetCards.Expirations.Count);
-                var iqTop = this.Height - 14 - 38;
-                var cardYStart = iqTop - 12 - 18 - (cardCount - 1) * 23;
-                cardYStart = Math.Max(y + 18, cardYStart);
-                if (this.snapshot.ResetCards.Expirations.Count == 0)
-                {
-                    this.SafeDrawString(g, "--", smallFont, muted, new RectangleF(cardX, cardYStart, cardWidth, 18), StringAlignment.Center);
+                    using (var fill = new LinearGradientBrush(bounds, Color.FromArgb(9, 17, 30), Color.FromArgb(4, 11, 20), LinearGradientMode.Vertical))
+                    {
+                        g.FillPath(fill, path);
+                    }
                 }
                 else
                 {
-                    var resetCardLines = new List<string>();
-                    var resetCardTextWidth = 0f;
-                    for (int i = 0; i < this.snapshot.ResetCards.Expirations.Count; i++)
+                    using (var fill = new SolidBrush(this.MiniBackColor()))
                     {
-                        var line = T.Text("重置卡") + " " + (i + 1).ToString(CultureInfo.InvariantCulture) + ": " + DateText.ResetDescriptionDetailed(this.snapshot.ResetCards.Expirations[i]);
-                        resetCardLines.Add(line);
-                        resetCardTextWidth = Math.Max(resetCardTextWidth, g.MeasureString(line, smallFont).Width);
-                    }
-
-                    var resetCardGroupWidth = Math.Min(cardWidth, (int)Math.Ceiling(resetCardTextWidth) + 2);
-                    var resetCardGroupX = cardX + (cardWidth - resetCardGroupWidth) / 2;
-                    var cardY = cardYStart;
-                    for (int i = 0; i < resetCardLines.Count; i++)
-                    {
-                        this.SafeDrawString(g, resetCardLines[i], smallFont, muted, new RectangleF(resetCardGroupX, cardY, resetCardGroupWidth, 18), StringAlignment.Near);
-                        cardY += 23;
+                        g.FillPath(fill, path);
                     }
                 }
-                this.DrawModelIqRow(g, contentLeft, iqTop, contentWidth, 38, smallFont, detailTextBrush, muted);
+                g.DrawPath(border, path);
+            }
+
+            this.DrawMiniStyleHeader(g);
+            if (this.snapshot.ErrorMessage != null)
+            {
+                this.DrawMiniStyleError(g);
+                return;
+            }
+
+            if (this.detailPage == 1) this.DrawMiniStyleResetCards(g);
+            else this.DrawMiniStyleDashboard(g);
+        }
+
+        private void DrawMiniStyleHeader(Graphics g)
+        {
+            if (this.IsMiniDarkStyle())
+            {
+                this.DrawMiniDarkHeader(g);
+                return;
+            }
+
+            using (var titleFont = new Font("Segoe UI Semibold", 14f, FontStyle.Bold))
+            using (var title = new SolidBrush(this.MiniTextColor()))
+            using (var line = new Pen(this.MiniLineColor()))
+            {
+                this.SafeDrawString(g, "CodexFloat", titleFont, title, new RectangleF(20, 15, 150, 24));
+                g.DrawLine(line, 0, 52, this.Width, 52);
+            }
+
+            this.detailDashboardTabBounds = new Rectangle(208, 12, 62, 30);
+            this.detailResetCardsTabBounds = new Rectangle(274, 12, 66, 30);
+            this.DrawMiniStyleTab(g, this.detailDashboardTabBounds, this.DesignDashboardText(), this.detailPage == 0);
+            this.DrawMiniStyleTab(g, this.detailResetCardsTabBounds, this.DesignResetCardsText(), this.detailPage == 1);
+        }
+
+        private void DrawMiniStyleTab(Graphics g, Rectangle rect, string text, bool active)
+        {
+            using (var path = RoundRect(rect, 6))
+            using (var fill = new SolidBrush(active ? this.MiniAccentColor() : this.MiniInactiveTabColor()))
+            using (var border = new Pen(active ? this.MiniAccentColor() : this.MiniLineColor()))
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 8.6f, FontStyle.Bold))
+            using (var brush = new SolidBrush(active ? this.MiniActiveTabTextColor() : this.MiniTextColor()))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+                this.SafeDrawString(g, text, font, brush, new RectangleF(rect.Left, rect.Top + 6, rect.Width, 16), true);
+            }
+        }
+
+        private bool IsMiniDarkStyle()
+        {
+            return string.Equals(ExpandedUiStyleOptions.Normalize(this.expandedUiStyle), ExpandedUiStyleOptions.MiniDark, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void DrawMiniDarkHeader(Graphics g)
+        {
+            var resetPage = this.detailPage == 1;
+            using (var titleFont = new Font("Segoe UI Semibold", resetPage ? 12.4f : 15.4f, FontStyle.Bold))
+            using (var title = new SolidBrush(this.MiniTextColor()))
+            using (var line = new Pen(this.MiniLineColor()))
+            {
+                if (resetPage)
+                {
+                    this.DrawCodexMark(g, 16, 16, 17);
+                    this.SafeDrawString(g, "CodexFloat", titleFont, title, new RectangleF(42, 14, 126, 24));
+                }
+                else
+                {
+                    this.SafeDrawString(g, "CodexFloat", titleFont, title, new RectangleF(16, 13, 158, 26));
+                }
+                g.DrawLine(line, 0, 52, this.Width, 52);
+            }
+
+            if (resetPage)
+            {
+                this.detailDashboardTabBounds = new Rectangle(228, 14, 64, 30);
+                this.detailResetCardsTabBounds = new Rectangle(292, 14, 58, 30);
+            }
+            else
+            {
+                this.detailDashboardTabBounds = new Rectangle(230, 12, 66, 40);
+                this.detailResetCardsTabBounds = new Rectangle(302, 12, 56, 40);
+            }
+            this.DrawMiniDarkTab(g, this.detailDashboardTabBounds, this.DesignDashboardText(), this.detailPage == 0);
+            this.DrawMiniDarkTab(g, this.detailResetCardsTabBounds, this.DesignResetCardsText(), this.detailPage == 1);
+        }
+
+        private void DrawMiniDarkTab(Graphics g, Rectangle rect, string text, bool active)
+        {
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 9.2f, FontStyle.Bold))
+            {
+                if (this.detailPage == 1)
+                {
+                    using (var path = RoundRect(rect, 6))
+                    using (var fill = active
+                        ? new LinearGradientBrush(rect, Color.FromArgb(22, 45, 88), Color.FromArgb(14, 27, 51), LinearGradientMode.Vertical)
+                        : new LinearGradientBrush(rect, Color.FromArgb(12, 20, 33), Color.FromArgb(8, 15, 27), LinearGradientMode.Vertical))
+                    using (var border = new Pen(active ? Color.FromArgb(54, 100, 176) : this.MiniLineColor()))
+                    using (var brush = new SolidBrush(active ? this.MiniTextColor() : this.MiniSecondaryColor()))
+                    {
+                        g.FillPath(fill, path);
+                        g.DrawPath(border, path);
+                        this.SafeDrawString(g, text, font, brush, new RectangleF(rect.Left, rect.Top + 6, rect.Width, 16), true);
+                    }
+                    if (active)
+                    {
+                        using (var pen = new Pen(Color.FromArgb(78, 148, 255), 2f))
+                        {
+                            g.DrawLine(pen, rect.Left + 5, rect.Bottom - 1, rect.Right - 5, rect.Bottom - 1);
+                        }
+                    }
+                    return;
+                }
+
+                using (var brush = new SolidBrush(active ? this.MiniAccentColor() : this.MiniSecondaryColor()))
+                {
+                    this.SafeDrawString(g, text, font, brush, new RectangleF(rect.Left, rect.Top + 10, rect.Width, 16), true);
+                }
+                if (active)
+                {
+                    using (var pen = new Pen(this.MiniAccentColor(), 2f))
+                    {
+                        g.DrawLine(pen, rect.Left + 5, 51, rect.Right - 5, 51);
+                    }
+                }
+            }
+        }
+
+        private void DrawMiniDarkDashboard(Graphics g)
+        {
+            var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
+            this.DrawMiniDarkIqPanel(g, new Rectangle(8, 57, 142, 90), radar);
+            this.DrawMiniDarkUsagePanel(g, new Rectangle(156, 57, 196, 90));
+            this.DrawMiniDarkBottomResetRow(g);
+        }
+
+        private void DrawMiniDarkIqPanel(Graphics g, Rectangle rect, ModelIqRadar radar)
+        {
+            this.DrawMiniDarkPanel(g, rect, 7);
+            using (var titleFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 9.6f, FontStyle.Bold))
+            using (var title = new SolidBrush(this.MiniTextColor()))
+            {
+                this.SafeDrawString(g, T.IsChinese ? "GPT 模型 IQ" : "GPT Model IQ", titleFont, title, new RectangleF(rect.Left + 10, rect.Top + 6, rect.Width - 20, 18));
+            }
+            this.DrawMiniDarkIqCard(g, new Rectangle(rect.Left + 6, rect.Top + 24, rect.Width - 12, 31), radar.Scores.Count > 0 ? radar.Scores[0] : new ModelIqScore("--"), true);
+            this.DrawMiniDarkIqCard(g, new Rectangle(rect.Left + 6, rect.Top + 58, rect.Width - 12, 29), radar.Scores.Count > 1 ? radar.Scores[1] : new ModelIqScore("--"), false);
+        }
+
+        private void DrawMiniDarkIqCard(Graphics g, Rectangle rect, ModelIqScore score, bool primary)
+        {
+            this.DrawMiniDarkPanel(g, rect, 5);
+            using (var labelFont = new Font("Segoe UI Semibold", 8.1f, FontStyle.Bold))
+            using (var scoreFont = new Font("Segoe UI Semibold", primary ? 17.4f : 16.2f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var accent = new SolidBrush(this.MiniAccentColor()))
+            {
+                this.SafeDrawString(g, score.Label, labelFont, text, new RectangleF(rect.Left + 8, rect.Top + 3, rect.Width - 16, 12));
+                this.SafeDrawString(g, score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", scoreFont, accent, new RectangleF(rect.Left + 8, rect.Top + 12, rect.Width - 16, rect.Height - 12));
+            }
+        }
+
+        private void DrawMiniDarkUsagePanel(Graphics g, Rectangle rect)
+        {
+            this.DrawMiniDarkPanel(g, rect, 7);
+            using (var line = new Pen(this.MiniLineColor()))
+            using (var updateFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 8.4f))
+            using (var secondary = new SolidBrush(this.MiniSecondaryColor()))
+            {
+                this.SafeDrawString(g, (T.IsChinese ? "更新于 " : "Updated ") + this.snapshot.UpdatedAt.ToString("HH:mm:ss"), updateFont, secondary, new RectangleF(rect.Left + 10, rect.Top + 7, rect.Width - 20, 16), StringAlignment.Far);
+                g.DrawLine(line, rect.Left, rect.Top + 24, rect.Right, rect.Top + 24);
+                g.DrawLine(line, rect.Left, rect.Top + 57, rect.Right, rect.Top + 57);
+            }
+            this.DrawMiniDarkUsageRow(g, new Rectangle(rect.Left + 8, rect.Top + 25, rect.Width - 16, 32), this.snapshot.Usage.FiveHour, this.DesignFiveHourLabel());
+            this.DrawMiniDarkUsageRow(g, new Rectangle(rect.Left + 8, rect.Top + 58, rect.Width - 16, 31), this.snapshot.Usage.Weekly, this.DesignWeeklyLabel());
+        }
+
+        private void DrawMiniDarkUsageRow(Graphics g, Rectangle rect, UsageWindow usage, string label)
+        {
+            var percent = usage != null && usage.Available ? Math.Max(0, Math.Min(100, usage.RemainingPercent)) : 0;
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 11.8f, FontStyle.Bold))
+            using (var small = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 7.4f))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var accent = new SolidBrush(this.MiniAccentColor()))
+            using (var secondary = new SolidBrush(this.MiniSecondaryColor()))
+            {
+                this.SafeDrawString(g, label, font, text, new RectangleF(rect.Left, rect.Top, 72, 20), StringAlignment.Near, StringAlignment.Center);
+                this.SafeDrawString(g, T.Text("剩余"), small, secondary, new RectangleF(rect.Left + 116, rect.Top + 3, 28, 14), StringAlignment.Near, StringAlignment.Center);
+                this.SafeDrawString(g, percent.ToString("0", CultureInfo.InvariantCulture) + "%", font, accent, new RectangleF(rect.Right - 52, rect.Top, 52, 20), StringAlignment.Far, StringAlignment.Center);
+                this.DrawMiniProgressBar(g, new Rectangle(rect.Left, rect.Top + 19, rect.Width, 5), percent);
+                this.SafeDrawString(g, this.MiniResetLine(usage), small, secondary, new RectangleF(rect.Left, rect.Top + 24, rect.Width, 11));
+            }
+        }
+
+        private void DrawMiniDarkBottomResetRow(Graphics g)
+        {
+            var row = new Rectangle(8, 149, 344, 26);
+            this.DrawMiniDarkPanel(g, row, 6);
+            var expiration = this.snapshot.ResetCards.Expirations.Count > 0 ? (DateTime?)this.snapshot.ResetCards.Expirations[0] : null;
+            using (var line = new Pen(this.MiniLineColor()))
+            using (var headerFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 8.0f, FontStyle.Bold))
+            using (var valueFont = new Font("Segoe UI Semibold", 10.2f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var secondary = new SolidBrush(this.MiniSecondaryColor()))
+            using (var accent = new SolidBrush(this.MiniAccentColor()))
+            {
+                g.DrawLine(line, row.Left + 108, row.Top + 4, row.Left + 108, row.Bottom - 4);
+                g.DrawLine(line, row.Left + 232, row.Top + 4, row.Left + 232, row.Bottom - 4);
+                this.SafeDrawString(g, T.IsChinese ? "重置卡编号" : "Card ID", headerFont, secondary, new RectangleF(row.Left, row.Top + 2, 108, 11), true);
+                this.SafeDrawString(g, T.IsChinese ? "到期时间" : "Expires", headerFont, secondary, new RectangleF(row.Left + 108, row.Top + 2, 124, 11), true);
+                this.SafeDrawString(g, T.IsChinese ? "剩余天数" : "Days", headerFont, secondary, new RectangleF(row.Left + 232, row.Top + 2, 112, 11), true);
+                if (expiration.HasValue)
+                {
+                    this.SafeDrawString(g, this.MiniCardId(0), valueFont, text, new RectangleF(row.Left, row.Top + 13, 108, 13), true);
+                    this.SafeDrawString(g, expiration.Value.ToString("MM-dd HH:mm"), valueFont, text, new RectangleF(row.Left + 108, row.Top + 13, 124, 13), true);
+                    this.SafeDrawString(g, this.MiniRemainingDays(expiration.Value), valueFont, accent, new RectangleF(row.Left + 232, row.Top + 13, 112, 13), true);
+                }
+            }
+        }
+
+        private void DrawMiniDarkResetCards(Graphics g)
+        {
+            this.resetCardPrevBounds = Rectangle.Empty;
+            this.resetCardNextBounds = Rectangle.Empty;
+            this.ClampResetCardPage();
+            using (var headerFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 10.0f, FontStyle.Bold))
+            using (var rowFont = new Font("Segoe UI Semibold", 11.4f, FontStyle.Bold))
+            using (var valueFont = new Font("Segoe UI Semibold", 12.8f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var accent = new SolidBrush(this.MiniAccentColor()))
+            using (var secondary = new SolidBrush(this.MiniSecondaryColor()))
+            using (var line = new Pen(this.MiniLineColor()))
+            {
+                this.SafeDrawString(g, T.IsChinese ? "重置卡编号" : "Card ID", headerFont, secondary, new RectangleF(16, 58, 112, 26), StringAlignment.Near, StringAlignment.Center);
+                this.SafeDrawString(g, T.IsChinese ? "到期时间" : "Expires", headerFont, secondary, new RectangleF(146, 58, 108, 26), StringAlignment.Center, StringAlignment.Center);
+                this.SafeDrawString(g, T.IsChinese ? "剩余天数" : "Days", headerFont, secondary, new RectangleF(282, 58, 62, 26), StringAlignment.Center, StringAlignment.Center);
+                g.DrawLine(line, 0, 84, this.Width, 84);
+
+                var start = this.resetCardPage * 4;
+                for (int i = 0; i < 4; i++)
+                {
+                    var rowTop = 84 + i * 24;
+                    if (i > 0) g.DrawLine(line, 0, rowTop, this.Width, rowTop);
+                    var cardIndex = start + i;
+                    if (cardIndex >= this.snapshot.ResetCards.Expirations.Count) continue;
+                    var expiration = this.snapshot.ResetCards.Expirations[cardIndex];
+                    this.SafeDrawString(g, this.MiniCardId(cardIndex), rowFont, text, new RectangleF(16, rowTop, 112, 24), StringAlignment.Near, StringAlignment.Center);
+                    this.SafeDrawString(g, expiration.ToString("MM-dd HH:mm"), rowFont, text, new RectangleF(146, rowTop, 108, 24), StringAlignment.Center, StringAlignment.Center);
+                    this.SafeDrawString(g, this.MiniRemainingDays(expiration), valueFont, accent, new RectangleF(282, rowTop, 62, 24), StringAlignment.Center, StringAlignment.Center);
+                }
+            }
+        }
+
+        private void DrawMiniDarkPanel(Graphics g, Rectangle rect, int radius)
+        {
+            using (var path = RoundRect(rect, radius))
+            using (var fill = new LinearGradientBrush(rect, Color.FromArgb(18, 29, 47), Color.FromArgb(8, 17, 30), LinearGradientMode.Vertical))
+            using (var border = new Pen(this.MiniLineColor()))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+        }
+
+        private void DrawMiniStyleDashboard(Graphics g)
+        {
+            if (this.IsMiniDarkStyle())
+            {
+                this.DrawMiniDarkDashboard(g);
+                return;
+            }
+
+            using (var labelFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 8.5f))
+            using (var label = new SolidBrush(this.MiniTextColor()))
+            using (var secondary = new SolidBrush(this.MiniSecondaryColor()))
+            {
+                this.SafeDrawString(g, T.IsChinese ? "GPT 模型 IQ" : "GPT Model IQ", labelFont, label, new RectangleF(20, 60, 120, 16));
+                this.SafeDrawString(g, (T.IsChinese ? "更新于 " : "Updated ") + this.snapshot.UpdatedAt.ToString("HH:mm:ss"), labelFont, secondary, new RectangleF(212, 60, 128, 16), StringAlignment.Far);
+            }
+
+            var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
+            this.DrawMiniIqCard(g, new Rectangle(16, 78, 126, 38), radar.Scores.Count > 0 ? radar.Scores[0] : new ModelIqScore("--"));
+            this.DrawMiniIqCard(g, new Rectangle(16, 120, 126, 32), radar.Scores.Count > 1 ? radar.Scores[1] : new ModelIqScore("--"));
+            this.DrawMiniUsageCard(g, new Rectangle(150, 78, 194, 38), this.snapshot.Usage.FiveHour, this.DesignFiveHourLabel());
+            this.DrawMiniUsageCard(g, new Rectangle(150, 120, 194, 32), this.snapshot.Usage.Weekly, this.DesignWeeklyLabel());
+            this.DrawMiniBottomResetRow(g);
+        }
+
+        private void DrawMiniIqCard(Graphics g, Rectangle rect, ModelIqScore score)
+        {
+            this.DrawMiniCell(g, rect);
+            using (var labelFont = new Font("Segoe UI Semibold", 8.2f, FontStyle.Bold))
+            using (var scoreFont = new Font("Segoe UI Semibold", 12.6f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var accent = new SolidBrush(this.MiniAccentColor()))
+            {
+                this.SafeDrawString(g, score.Label, labelFont, text, new RectangleF(rect.Left + 8, rect.Top + 5, rect.Width - 16, 14));
+                this.SafeDrawString(g, score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", scoreFont, accent, new RectangleF(rect.Left + 8, rect.Top + 20, rect.Width - 16, 18));
+            }
+        }
+
+        private void DrawMiniUsageCard(Graphics g, Rectangle rect, UsageWindow usage, string label)
+        {
+            this.DrawMiniCell(g, rect);
+            var percent = usage != null && usage.Available ? Math.Max(0, Math.Min(100, usage.RemainingPercent)) : 0;
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 8.2f, FontStyle.Bold))
+            using (var small = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 7.4f))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var success = new SolidBrush(this.MiniSuccessColor()))
+            using (var secondary = new SolidBrush(this.MiniSecondaryColor()))
+            {
+                this.SafeDrawString(g, label, font, text, new RectangleF(rect.Left + 8, rect.Top + 5, 58, 14));
+                this.SafeDrawString(g, T.Text("剩余"), font, text, new RectangleF(rect.Left + 82, rect.Top + 5, 40, 14));
+                this.SafeDrawString(g, percent.ToString("0", CultureInfo.InvariantCulture) + "%", font, success, new RectangleF(rect.Right - 52, rect.Top + 5, 44, 14), StringAlignment.Far);
+                this.DrawMiniProgressBar(g, new Rectangle(rect.Left + 8, rect.Top + 21, rect.Width - 16, 6), percent);
+                this.SafeDrawString(g, this.DesignResetLine(usage), small, secondary, new RectangleF(rect.Left + 8, rect.Top + 29, rect.Width - 16, 12));
+            }
+        }
+
+        private void DrawMiniBottomResetRow(Graphics g)
+        {
+            using (var line = new Pen(this.MiniLineColor()))
+            {
+                g.DrawLine(line, 16, 152, this.Width - 16, 152);
+            }
+            var expiration = this.snapshot.ResetCards.Expirations.Count > 0 ? (DateTime?)this.snapshot.ResetCards.Expirations[0] : null;
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 7.4f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var success = new SolidBrush(this.MiniSuccessColor()))
+            {
+                this.SafeDrawString(g, T.IsChinese ? "重置卡编号" : "Card", font, text, new RectangleF(20, 155, 95, 12));
+                this.SafeDrawString(g, T.IsChinese ? "到期时间" : "Expires", font, text, new RectangleF(132, 155, 86, 12));
+                this.SafeDrawString(g, T.IsChinese ? "剩余" : "Days", font, text, new RectangleF(272, 155, 54, 12), StringAlignment.Far);
+                if (expiration.HasValue)
+                {
+                    this.SafeDrawString(g, this.MiniCardId(0), font, text, new RectangleF(20, 167, 95, 12));
+                    this.SafeDrawString(g, expiration.Value.ToString("MM-dd HH:mm"), font, text, new RectangleF(132, 167, 92, 12));
+                    this.SafeDrawString(g, this.MiniRemainingDays(expiration.Value), font, success, new RectangleF(272, 167, 54, 12), StringAlignment.Far);
+                }
+            }
+        }
+
+        private void DrawMiniStyleResetCards(Graphics g)
+        {
+            if (this.IsMiniDarkStyle())
+            {
+                this.DrawMiniDarkResetCards(g);
+                return;
+            }
+
+            var table = new Rectangle(16, 58, 328, 112);
+            var pageCount = this.ResetCardPageCount();
+            var hasPages = pageCount > 1;
+            this.resetCardPrevBounds = hasPages ? new Rectangle(270, 16, 26, 24) : Rectangle.Empty;
+            this.resetCardNextBounds = hasPages ? new Rectangle(314, 16, 26, 24) : Rectangle.Empty;
+
+            using (var headerFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 8.1f, FontStyle.Bold))
+            using (var rowFont = new Font("Segoe UI", 8.2f))
+            using (var valueFont = new Font("Segoe UI Semibold", 10f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            using (var success = new SolidBrush(this.MiniSuccessColor()))
+            using (var line = new Pen(this.MiniLineColor()))
+            {
+                this.SafeDrawString(g, T.IsChinese ? "重置卡编号" : "Card ID", headerFont, text, new RectangleF(table.Left + 8, table.Top, 112, 20));
+                this.SafeDrawString(g, T.IsChinese ? "到期时间" : "Expires", headerFont, text, new RectangleF(table.Left + 132, table.Top, 92, 20));
+                this.SafeDrawString(g, T.IsChinese ? "剩余天数" : "Days", headerFont, text, new RectangleF(table.Right - 82, table.Top, 72, 20), StringAlignment.Far);
+                g.DrawLine(line, table.Left, table.Top + 24, table.Right, table.Top + 24);
+
+                var start = this.resetCardPage * 4;
+                for (int i = 0; i < 4; i++)
+                {
+                    var cardIndex = start + i;
+                    var rowTop = table.Top + 27 + i * 24;
+                    var row = new Rectangle(table.Left, rowTop - 2, table.Width, 22);
+                    this.DrawMiniCell(g, row);
+                    if (cardIndex >= this.snapshot.ResetCards.Expirations.Count) continue;
+                    var expiration = this.snapshot.ResetCards.Expirations[cardIndex];
+                    this.SafeDrawString(g, this.MiniCardId(cardIndex), rowFont, text, new RectangleF(table.Left + 8, rowTop, 112, 16));
+                    this.SafeDrawString(g, expiration.ToString("MM-dd HH:mm"), rowFont, text, new RectangleF(table.Left + 132, rowTop, 92, 16));
+                    this.SafeDrawString(g, this.MiniRemainingDays(expiration), valueFont, success, new RectangleF(table.Right - 82, rowTop - 1, 72, 18), StringAlignment.Far);
+                }
+            }
+
+            if (hasPages)
+            {
+                this.DrawResetCardNavButton(g, this.resetCardPrevBounds, -1);
+                this.DrawResetCardNavButton(g, this.resetCardNextBounds, 1);
+            }
+        }
+
+        private void DrawMiniCell(Graphics g, Rectangle rect)
+        {
+            using (var path = RoundRect(rect, 5))
+            using (var fill = new SolidBrush(this.MiniPanelColor()))
+            using (var border = new Pen(this.MiniLineColor()))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+        }
+
+        private void DrawMiniProgressBar(Graphics g, Rectangle rect, double percent)
+        {
+            using (var bgPath = RoundRect(rect, 3))
+            using (var bg = new SolidBrush(this.MiniProgressBackColor()))
+            {
+                g.FillPath(bg, bgPath);
+            }
+            var fillWidth = Math.Max(0, Math.Min(rect.Width, (int)Math.Round(rect.Width * percent / 100.0)));
+            if (fillWidth <= 0) return;
+            using (var fillPath = RoundRect(new Rectangle(rect.Left, rect.Top, fillWidth, rect.Height), 3))
+            using (var fill = new SolidBrush(this.MiniAccentColor()))
+            {
+                g.FillPath(fill, fillPath);
+            }
+        }
+
+        private void DrawMiniStyleError(Graphics g)
+        {
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 9f, FontStyle.Bold))
+            using (var text = new SolidBrush(this.MiniTextColor()))
+            {
+                this.SafeDrawString(g, T.Text("连接失败"), font, text, new RectangleF(20, 72, this.Width - 40, 22));
+                this.SafeDrawString(g, Trim(this.snapshot.ErrorMessage ?? "", 48), font, text, new RectangleF(20, 98, this.Width - 40, 48));
+            }
+        }
+
+        private string MiniCardId(int index)
+        {
+            var number = 1234 + index * 1111;
+            return "CARD-" + number.ToString("0000", CultureInfo.InvariantCulture);
+        }
+
+        private string MiniResetLine(UsageWindow usage)
+        {
+            if (usage == null || !usage.ResetAtLocal.HasValue)
+            {
+                return (T.IsChinese ? "重置于 " : "Resets in ") + "--";
+            }
+            return (T.IsChinese ? "重置于 " : "Resets in ") + this.DesignRemainingText(usage.ResetAtLocal.Value);
+        }
+
+        private string MiniRemainingDays(DateTime expiration)
+        {
+            var remaining = expiration - DateTime.Now;
+            if (remaining.TotalSeconds < 0) remaining = TimeSpan.Zero;
+            return Math.Max(0, (int)Math.Ceiling(remaining.TotalDays)).ToString(CultureInfo.InvariantCulture);
+        }
+
+        private Color MiniBackColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniCyan: return Color.FromArgb(7, 24, 28);
+                case ExpandedUiStyleOptions.MiniPurple: return Color.FromArgb(15, 11, 24);
+                case ExpandedUiStyleOptions.MiniLight: return Color.White;
+                default: return Color.FromArgb(7, 14, 25);
+            }
+        }
+
+        private Color MiniPanelColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniCyan: return Color.FromArgb(14, 35, 40);
+                case ExpandedUiStyleOptions.MiniPurple: return Color.FromArgb(23, 18, 39);
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(247, 248, 250);
+                default: return Color.FromArgb(8, 17, 30);
+            }
+        }
+
+        private Color MiniInactiveTabColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(238, 240, 242);
+                default: return Color.FromArgb(46, 56, 72);
+            }
+        }
+
+        private Color MiniLineColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniCyan: return Color.FromArgb(23, 50, 58);
+                case ExpandedUiStyleOptions.MiniPurple: return Color.FromArgb(36, 30, 58);
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(229, 231, 235);
+                default: return Color.FromArgb(31, 45, 64);
+            }
+        }
+
+        private Color MiniBorderColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(214, 219, 226);
+                default: return Color.FromArgb(43, 56, 76);
+            }
+        }
+
+        private Color MiniTextColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(31, 41, 55);
+                default: return Color.FromArgb(244, 248, 255);
+            }
+        }
+
+        private Color MiniSecondaryColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniCyan: return Color.FromArgb(153, 166, 173);
+                case ExpandedUiStyleOptions.MiniPurple: return Color.FromArgb(166, 160, 179);
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(107, 114, 128);
+                default: return Color.FromArgb(166, 176, 190);
+            }
+        }
+
+        private Color MiniAccentColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniCyan: return Color.FromArgb(0, 194, 199);
+                case ExpandedUiStyleOptions.MiniPurple: return Color.FromArgb(136, 92, 246);
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(34, 197, 94);
+                default: return Color.FromArgb(47, 128, 255);
+            }
+        }
+
+        private Color MiniSuccessColor()
+        {
+            if (this.IsMiniDarkStyle()) return this.MiniAccentColor();
+            return Color.FromArgb(46, 204, 113);
+        }
+
+        private Color MiniProgressBackColor()
+        {
+            switch (ExpandedUiStyleOptions.Normalize(this.expandedUiStyle))
+            {
+                case ExpandedUiStyleOptions.MiniLight: return Color.FromArgb(209, 213, 219);
+                default: return Color.FromArgb(54, 67, 85);
+            }
+        }
+
+        private Color MiniActiveTabTextColor()
+        {
+            return ExpandedUiStyleOptions.Normalize(this.expandedUiStyle) == ExpandedUiStyleOptions.MiniLight
+                ? Color.FromArgb(22, 101, 52)
+                : Color.White;
+        }
+
+        private void DrawDesignHeader(Graphics g)
+        {
+            this.DrawCodexMark(g, 19, 10, 22);
+            using (var titleFont = new Font("Segoe UI Semibold", 12.75f, FontStyle.Regular))
+            using (var titleBrush = new SolidBrush(this.theme.StandardText))
+            {
+                this.SafeDrawString(g, "CodexFloat", titleFont, titleBrush, new RectangleF(61, 0, 180, 42), StringAlignment.Near, StringAlignment.Center);
+            }
+        }
+
+        private void DrawDesignTabs(Graphics g)
+        {
+            this.detailDashboardTabBounds = new Rectangle(397, 0, 74, 42);
+            this.detailResetCardsTabBounds = new Rectangle(496, 0, 74, 42);
+            this.DrawDesignTab(g, this.detailDashboardTabBounds, this.DesignDashboardText(), this.detailPage == 0);
+            this.DrawDesignTab(g, this.detailResetCardsTabBounds, this.DesignResetCardsText(), this.detailPage == 1);
+            using (var pen = new Pen(this.theme.StandardBorder))
+            {
+                g.DrawLine(pen, 0, 42, this.Width, 42);
+            }
+        }
+
+        private void DrawDesignTab(Graphics g, Rectangle rect, string text, bool active)
+        {
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 12.75f, FontStyle.Regular))
+            using (var brush = new SolidBrush(active ? this.theme.StandardAccent : this.theme.StandardText))
+            {
+                this.SafeDrawString(g, text, font, brush, new RectangleF(rect.Left, rect.Top, rect.Width, rect.Height), StringAlignment.Center, StringAlignment.Center);
+            }
+            if (active)
+            {
+                using (var pen = new Pen(this.theme.StandardAccent, 2f))
+                {
+                    g.DrawLine(pen, rect.Left + 2, 41, rect.Right - 2, 41);
+                }
+            }
+        }
+
+        private void DrawDashboardDesignPage(Graphics g)
+        {
+            this.resetCardPrevBounds = Rectangle.Empty;
+            this.resetCardNextBounds = Rectangle.Empty;
+            this.DrawStandardDashboardHeader(g);
+            this.DrawStandardIqGrid(g, new Rectangle(31, 70, 264, 173));
+            this.DrawStandardUsageBlock(g, new Rectangle(322, 70, 246, 166));
+            this.DrawDashboardResetCardTable(g, new Rectangle(31, 286, 537, 84));
+        }
+
+        private void DrawStandardDashboardHeader(Graphics g)
+        {
+            using (var updateFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 8.25f))
+            using (var secondary = new SolidBrush(this.theme.StandardMuted))
+            {
+                var update = (T.IsChinese ? "更新时间：" : "Updated ") + this.snapshot.UpdatedAt.ToString(T.IsChinese ? "yyyy-MM-dd HH:mm:ss" : "HH:mm:ss");
+                this.SafeDrawString(g, update, updateFont, secondary, new RectangleF(386, 55, 181, 20), StringAlignment.Far);
+            }
+        }
+
+        private void DrawStandardIqGrid(Graphics g, Rectangle rect)
+        {
+            var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
+            var cardWidth = 126;
+            var cardHeight = 80;
+            var gapX = 12;
+            var gapY = 13;
+            for (int i = 0; i < 4; i++)
+            {
+                var x = rect.Left + (i % 2) * (cardWidth + gapX);
+                var y = rect.Top + (i / 2) * (cardHeight + gapY);
+                var score = i < radar.Scores.Count ? radar.Scores[i] : new ModelIqScore("--");
+                this.DrawStandardIqCard(g, new Rectangle(x, y, cardWidth, cardHeight), score, i);
+            }
+        }
+
+        private void DrawStandardIqCard(Graphics g, Rectangle rect, ModelIqScore score, int index)
+        {
+            using (var path = RoundRect(rect, 8))
+            using (var fill = new LinearGradientBrush(rect, DesignIqTopColor(index), DesignIqBottomColor(index), LinearGradientMode.Vertical))
+            using (var border = new Pen(Color.FromArgb(205, this.theme.StandardBorder)))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+            using (var labelFont = new Font("Segoe UI", 7.5f, FontStyle.Regular))
+            using (var scoreFont = new Font("Segoe UI Semibold", 18f, FontStyle.Regular))
+            using (var labelBrush = new SolidBrush(DesignIqTextColor(index)))
+            using (var scoreBrush = new SolidBrush(DesignIqTextColor(index)))
+            {
+                this.SafeDrawString(g, this.StandardIqLabel(index, score), labelFont, labelBrush, new RectangleF(rect.Left + 10, rect.Top + 16, rect.Width - 20, 16), true);
+                this.SafeDrawString(g, score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", scoreFont, scoreBrush, new RectangleF(rect.Left + 10, rect.Top + 39, rect.Width - 20, 30), true);
+            }
+        }
+
+        private string StandardIqLabel(int index, ModelIqScore score)
+        {
+            switch (index)
+            {
+                case 0: return "GPT-5.6-Sol-ultra";
+                case 1: return "GPT-5.6-Sol-medium";
+                case 2: return "GPT-5.6-Sol-low";
+                case 3: return "GPT-5.6-Terra-medium";
+                case 4: return "GPT-5.6-Luna-medium";
+                default: return score == null ? "--" : score.Label;
+            }
+        }
+
+        private void DrawStandardUsageBlock(Graphics g, Rectangle rect)
+        {
+            this.DrawDesignUsageLine(g, this.snapshot.Usage.FiveHour, rect.Left, rect.Top + 10, rect.Width, this.DesignFiveHourLabel());
+            this.DrawDesignUsageLine(g, this.snapshot.Usage.Weekly, rect.Left, rect.Top + 97, rect.Width, this.DesignWeeklyLabel());
+        }
+
+        private void DrawDesignUsageLine(Graphics g, UsageWindow usage, int x, int y, int width, string label)
+        {
+            var percent = usage != null && usage.Available ? Math.Max(0, Math.Min(100, usage.RemainingPercent)) : 0;
+            using (var labelFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 15.0f, FontStyle.Regular))
+            using (var bodyFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 8.25f))
+            using (var accent = new SolidBrush(this.theme.StandardAccent))
+            using (var title = new SolidBrush(this.theme.StandardText))
+            using (var secondary = new SolidBrush(this.theme.StandardMuted))
+            {
+                this.SafeDrawString(g, label, labelFont, accent, new RectangleF(x, y, 76, 28));
+                this.SafeDrawString(g, T.Text("剩余"), labelFont, title, new RectangleF(x + width - 96, y, 46, 28));
+                this.SafeDrawString(g, usage != null && usage.Available ? percent.ToString("0", CultureInfo.InvariantCulture) + "%" : "--", labelFont, title, new RectangleF(x + width - 54, y, 54, 24), StringAlignment.Far);
+                this.DrawDesignProgressBar(g, new Rectangle(x, y + 40, width, 6), percent);
+                this.SafeDrawString(g, this.DesignResetLine(usage), bodyFont, secondary, new RectangleF(x, y + 54, width, 16));
+            }
+        }
+
+        private void DrawDesignProgressBar(Graphics g, Rectangle rect, double percent)
+        {
+            using (var bgPath = RoundRect(rect, 4))
+            using (var bg = new SolidBrush(this.theme.StandardProgressTrack))
+            {
+                g.FillPath(bg, bgPath);
+            }
+            var fillWidth = Math.Max(0, Math.Min(rect.Width, (int)Math.Round(rect.Width * percent / 100.0)));
+            if (fillWidth <= 0) return;
+            using (var fillPath = RoundRect(new Rectangle(rect.Left, rect.Top, fillWidth, rect.Height), 4))
+            using (var fill = new SolidBrush(this.theme.StandardAccent))
+            {
+                g.FillPath(fill, fillPath);
+            }
+        }
+
+        private void DrawDashboardResetCardTable(Graphics g, Rectangle rect)
+        {
+            var table = rect;
+            var headerHeight = table.Height / 2;
+            var rowHeight = table.Height - headerHeight;
+            this.DrawResetCardsTableFrame(g, table, headerHeight, rowHeight);
+            var next = this.snapshot.ResetCards.Expirations.Count > 0 ? (DateTime?)this.snapshot.ResetCards.Expirations[0] : null;
+            this.DrawResetCardsTableHeader(g, table, headerHeight);
+            if (next.HasValue)
+            {
+                this.DrawResetCardTableRow(g, table.Left, table.Top + headerHeight, table.Width, rowHeight, 0, next.Value);
+            }
+            else
+            {
+                using (var font = new Font("Segoe UI", 8.6f))
+                using (var secondary = new SolidBrush(this.theme.StandardMuted))
+                {
+                    this.SafeDrawString(g, "--", font, secondary, new RectangleF(table.Left, table.Top + headerHeight, table.Width, rowHeight), StringAlignment.Center, StringAlignment.Center);
+                }
+            }
+        }
+
+        private void DrawResetCardsDesignPage(Graphics g)
+        {
+            this.ClampResetCardPage();
+            var pageCount = this.ResetCardPageCount();
+            var hasPages = pageCount > 1;
+            var table = hasPages ? new Rectangle(31, 55, 537, 300) : new Rectangle(31, 55, 537, 326);
+            var headerHeight = hasPages ? 42 : 43;
+            var rowHeight = hasPages ? 43 : 47;
+            this.resetCardPrevBounds = hasPages ? new Rectangle(table.Right - 66, table.Bottom + 12, 22, 24) : Rectangle.Empty;
+            this.resetCardNextBounds = hasPages ? new Rectangle(table.Right - 32, table.Bottom + 12, 22, 24) : Rectangle.Empty;
+            this.DrawResetCardsTableFrame(g, table, headerHeight, rowHeight);
+            this.DrawResetCardsTableHeader(g, table, headerHeight);
+
+            var expirations = this.snapshot.ResetCards.Expirations;
+            var startIndex = this.resetCardPage * 6;
+            for (int i = 0; i < 6; i++)
+            {
+                var cardIndex = startIndex + i;
+                if (cardIndex >= expirations.Count) break;
+                this.DrawResetCardTableRow(g, table.Left, table.Top + headerHeight + i * rowHeight, table.Width, rowHeight, cardIndex, expirations[cardIndex]);
+            }
+
+            if (expirations.Count == 0)
+            {
+                using (var font = new Font("Segoe UI", 10f))
+                using (var secondary = new SolidBrush(this.theme.StandardMuted))
+                {
+                    this.SafeDrawString(g, "--", font, secondary, new RectangleF(table.Left, table.Top + 144, table.Width, 24), true);
+                }
+            }
+
+            if (hasPages)
+            {
+                using (var font = new Font("Segoe UI Semibold", 8.5f))
+                using (var secondary = new SolidBrush(this.theme.StandardMuted))
+                {
+                    var pageText = (this.resetCardPage + 1).ToString(CultureInfo.InvariantCulture) + " / " + pageCount.ToString(CultureInfo.InvariantCulture);
+                    this.SafeDrawString(g, pageText, font, secondary, new RectangleF(table.Right - 128, table.Bottom + 16, 52, 18), StringAlignment.Far);
+                }
+                this.DrawResetCardNavButton(g, this.resetCardPrevBounds, -1);
+                this.DrawResetCardNavButton(g, this.resetCardNextBounds, 1);
+            }
+        }
+
+        private void DrawResetCardsTableFrame(Graphics g, Rectangle table, int headerHeight, int rowHeight)
+        {
+            using (var path = RoundRect(table, 8))
+            using (var fill = new SolidBrush(this.theme.StandardSurface))
+            using (var border = new Pen(this.theme.StandardBorder))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+            using (var header = new SolidBrush(this.theme.StandardTableHeader))
+            using (var border = new Pen(this.theme.StandardBorder))
+            {
+                g.FillRectangle(header, table.Left + 1, table.Top + 1, table.Width - 2, headerHeight - 1);
+                for (int y = table.Top + headerHeight; y < table.Bottom; y += rowHeight)
+                {
+                    g.DrawLine(border, table.Left, y, table.Right, y);
+                }
+                g.DrawLine(border, table.Left + (int)Math.Round(table.Width * 0.31), table.Top, table.Left + (int)Math.Round(table.Width * 0.31), table.Bottom);
+                g.DrawLine(border, table.Left + (int)Math.Round(table.Width * 0.66), table.Top, table.Left + (int)Math.Round(table.Width * 0.66), table.Bottom);
+            }
+        }
+
+        private void DrawResetCardsTableHeader(Graphics g, Rectangle table, int headerHeight)
+        {
+            var fontSize = headerHeight >= 36 ? 11.0f : (headerHeight >= 26 ? 9.6f : 7.4f);
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", fontSize, FontStyle.Regular))
+            using (var text = new SolidBrush(this.theme.StandardText))
+            {
+                this.SafeDrawString(g, T.IsChinese ? "重置卡编号" : "Reset Card No.", font, text, new RectangleF(table.Left, table.Top, table.Width * 0.31f, headerHeight), StringAlignment.Center, StringAlignment.Center);
+                this.SafeDrawString(g, T.IsChinese ? "剩余时间" : "Remaining Time", font, text, new RectangleF(table.Left + table.Width * 0.31f, table.Top, table.Width * 0.35f, headerHeight), StringAlignment.Center, StringAlignment.Center);
+                this.SafeDrawString(g, T.IsChinese ? "到期时间" : "Expires At", font, text, new RectangleF(table.Left + table.Width * 0.66f, table.Top, table.Width * 0.34f, headerHeight), StringAlignment.Center, StringAlignment.Center);
+            }
+        }
+
+        private void DrawResetCardTableRow(Graphics g, int x, int y, int width, int height, int index, DateTime expiration)
+        {
+            var fontSize = height >= 36 ? 10.8f : (height >= 26 ? 9.6f : 7.4f);
+            using (var font = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", fontSize, FontStyle.Regular))
+            using (var text = new SolidBrush(this.theme.StandardText))
+            {
+                this.SafeDrawString(g, this.ResetCardShortLabel(index), font, text, new RectangleF(x, y, width * 0.31f, height), StringAlignment.Center, StringAlignment.Center);
+                this.SafeDrawString(g, this.ResetCardRemainingText(expiration), font, text, new RectangleF(x + width * 0.31f, y, width * 0.35f, height), StringAlignment.Center, StringAlignment.Center);
+                this.SafeDrawString(g, expiration.ToString("yyyy-MM-dd HH:mm"), font, text, new RectangleF(x + width * 0.66f, y, width * 0.34f, height), StringAlignment.Center, StringAlignment.Center);
+            }
+        }
+
+        private void DrawDesignPanel(Graphics g, Rectangle rect, int radius)
+        {
+            using (var path = RoundRect(rect, radius))
+            using (var fill = new SolidBrush(Color.White))
+            using (var border = new Pen(Color.FromArgb(217, 226, 241)))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+        }
+
+        private void DrawDesignModelIqRow(Graphics g, Rectangle rect)
+        {
+            var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
+            var gap = 14;
+            var cellWidth = (rect.Width - gap * 3) / 4;
+            for (int i = 0; i < 4; i++)
+            {
+                var score = i < radar.Scores.Count ? radar.Scores[i] : new ModelIqScore("--");
+                var cell = new Rectangle(rect.Left + i * (cellWidth + gap), rect.Top, cellWidth, rect.Height);
+                var topColor = DesignIqTopColor(i);
+                var bottomColor = DesignIqBottomColor(i);
+                using (var path = RoundRect(cell, 7))
+                using (var fill = new LinearGradientBrush(cell, topColor, bottomColor, LinearGradientMode.Vertical))
+                using (var border = new Pen(DesignIqBorderColor(i)))
+                {
+                    g.FillPath(fill, path);
+                    g.DrawPath(border, path);
+                }
+                using (var labelFont = new Font("Segoe UI Semibold", 7.7f, FontStyle.Bold))
+                using (var scoreFont = new Font("Segoe UI Semibold", 15.8f, FontStyle.Bold))
+                using (var labelBrush = new SolidBrush(DesignIqTextColor(i)))
+                using (var scoreBrush = new SolidBrush(DesignIqTextColor(i)))
+                {
+                    this.SafeDrawString(g, score.Label, labelFont, labelBrush, new RectangleF(cell.Left + 7, cell.Top + 7, cell.Width - 14, 15), true);
+                    this.SafeDrawString(g, score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", scoreFont, scoreBrush, new RectangleF(cell.Left + 7, cell.Top + 27, cell.Width - 14, 28), true);
+                }
+            }
+        }
+
+        private void DrawDesignError(Graphics g)
+        {
+            var rect = new Rectangle(36, 128, this.Width - 72, 160);
+            this.DrawDesignPanel(g, rect, 10);
+            using (var titleFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI Semibold", 12f, FontStyle.Bold))
+            using (var bodyFont = new Font(T.IsChinese ? "Microsoft YaHei UI" : "Segoe UI", 9.5f))
+            using (var title = new SolidBrush(Color.FromArgb(15, 23, 42)))
+            using (var secondary = new SolidBrush(Color.FromArgb(100, 116, 139)))
+            {
+                this.SafeDrawString(g, T.Text("连接失败"), titleFont, title, new RectangleF(rect.Left + 24, rect.Top + 22, rect.Width - 48, 24));
+                this.SafeDrawString(g, this.snapshot.ErrorMessage, bodyFont, title, new RectangleF(rect.Left + 24, rect.Top + 56, rect.Width - 48, 22));
+                this.SafeDrawString(g, T.Text("错误代码") + ": " + (this.snapshot.ErrorCode ?? "--"), bodyFont, secondary, new RectangleF(rect.Left + 24, rect.Top + 84, rect.Width - 48, 22));
+                this.SafeDrawString(g, Trim(this.snapshot.ErrorDetail ?? "", 150), bodyFont, secondary, new RectangleF(rect.Left + 24, rect.Top + 112, rect.Width - 48, 34));
+            }
+        }
+
+        private void DrawCodexMark(Graphics g, int x, int y, int size)
+        {
+            var center = new PointF(x + size / 2f, y + size / 2f);
+            var radius = size / 2f - 1f;
+            var points = new PointF[6];
+            for (int i = 0; i < 6; i++)
+            {
+                var angle = Math.PI / 6.0 + i * Math.PI / 3.0;
+                points[i] = new PointF(center.X + (float)Math.Cos(angle) * radius, center.Y + (float)Math.Sin(angle) * radius);
+            }
+            using (var pen = new Pen(this.theme.StandardAccent, 2.4f))
+            using (var font = new Font("Segoe UI Semibold", size * 0.46f, FontStyle.Bold))
+            using (var brush = new SolidBrush(this.theme.StandardAccent))
+            {
+                pen.LineJoin = LineJoin.Round;
+                g.DrawPolygon(pen, points);
+                this.SafeDrawString(g, "C", font, brush, new RectangleF(x, y + 1, size, size), true);
+            }
+        }
+
+        private string DesignTitleText()
+        {
+            return T.IsChinese ? "Codex 剩余用量 & 重置时间" : "Codex Remaining & Reset";
+        }
+
+        private string DesignDashboardText()
+        {
+            return T.IsChinese ? "仪表盘" : "Dashboard";
+        }
+
+        private string DesignResetCardsText()
+        {
+            return T.IsChinese ? "重置卡" : "Reset Cards";
+        }
+
+        private string DesignFiveHourLabel()
+        {
+            return T.IsChinese ? "5 小时" : "5h";
+        }
+
+        private string DesignWeeklyLabel()
+        {
+            return T.IsChinese ? "周" : "Weekly";
+        }
+
+        private string DesignResetLine(UsageWindow usage)
+        {
+            if (usage == null || !usage.ResetAtLocal.HasValue)
+            {
+                return (T.IsChinese ? "重置时间：" : "Reset: ") + "--";
+            }
+            return (T.IsChinese ? "重置时间：" : "Reset: ") + this.DesignRemainingText(usage.ResetAtLocal.Value) + " (" + usage.ResetAtLocal.Value.ToString("yyyy-MM-dd HH:mm") + ")";
+        }
+
+        private string DesignRemainingText(DateTime expiration)
+        {
+            var remaining = expiration - DateTime.Now;
+            if (remaining.TotalSeconds < 0) remaining = TimeSpan.Zero;
+            if (remaining.TotalDays >= 1)
+            {
+                var days = ((int)Math.Floor(remaining.TotalDays)).ToString(CultureInfo.InvariantCulture);
+                var hours = remaining.Hours.ToString("00", CultureInfo.InvariantCulture);
+                return T.IsChinese ? days + "天 " + hours + "小时" : days + "d " + hours + "h";
+            }
+            var hourText = ((int)Math.Floor(remaining.TotalHours)).ToString(CultureInfo.InvariantCulture);
+            var minuteText = remaining.Minutes.ToString("00", CultureInfo.InvariantCulture);
+            return T.IsChinese ? hourText + "小时 " + minuteText + "分" : hourText + "h " + minuteText + "m";
+        }
+
+        private static Color DesignIqTopColor(int index)
+        {
+            switch (index)
+            {
+                case 0: return Color.FromArgb(246, 242, 255);
+                case 1: return Color.FromArgb(239, 251, 247);
+                case 2: return Color.FromArgb(242, 247, 255);
+                default: return Color.FromArgb(255, 247, 238);
+            }
+        }
+
+        private static Color DesignIqBottomColor(int index)
+        {
+            switch (index)
+            {
+                case 0: return Color.FromArgb(231, 220, 255);
+                case 1: return Color.FromArgb(225, 245, 239);
+                case 2: return Color.FromArgb(228, 238, 255);
+                default: return Color.FromArgb(255, 237, 214);
+            }
+        }
+
+        private static Color DesignIqBorderColor(int index)
+        {
+            switch (index)
+            {
+                case 0: return Color.FromArgb(203, 185, 255);
+                case 1: return Color.FromArgb(184, 226, 215);
+                case 2: return Color.FromArgb(196, 215, 249);
+                default: return Color.FromArgb(245, 205, 169);
+            }
+        }
+
+        private static Color DesignIqTextColor(int index)
+        {
+            switch (index)
+            {
+                case 0: return Color.FromArgb(111, 35, 232);
+                case 1: return Color.FromArgb(0, 128, 128);
+                case 2: return Color.FromArgb(22, 100, 255);
+                default: return Color.FromArgb(255, 86, 20);
+            }
+        }
+
+        private string ResetCardShortLabel(int index)
+        {
+            var number = (index + 1).ToString(CultureInfo.InvariantCulture);
+            return T.IsChinese ? "卡片 " + number : "Card " + number;
+        }
+
+        private string ResetCardRemainingText(DateTime expiration)
+        {
+            return this.DesignRemainingText(expiration);
+        }
+
+        private void DrawResetCardNavButton(Graphics g, Rectangle bounds, int direction)
+        {
+            using (var path = RoundRect(bounds, 7))
+            using (var fill = new SolidBrush(Color.FromArgb(246, 248, 252)))
+            using (var border = new Pen(Color.FromArgb(217, 226, 241), 1f))
+            {
+                g.FillPath(fill, path);
+                g.DrawPath(border, path);
+            }
+
+            var cx = bounds.Left + bounds.Width / 2f;
+            var cy = bounds.Top + bounds.Height / 2f;
+            PointF[] points;
+            if (direction < 0)
+            {
+                points = new[] { new PointF(cx + 4f, cy - 7f), new PointF(cx - 4f, cy), new PointF(cx + 4f, cy + 7f) };
+            }
+            else
+            {
+                points = new[] { new PointF(cx - 4f, cy - 7f), new PointF(cx + 4f, cy), new PointF(cx - 4f, cy + 7f) };
+            }
+            using (var brush = new SolidBrush(Color.FromArgb(47, 128, 255)))
+            {
+                g.FillPolygon(brush, points);
             }
         }
 
@@ -4463,6 +5821,21 @@ namespace CodexFloat
             }
         }
 
+        private void DrawMiniWaterText(Graphics g, string text, Font font, double percent, Rectangle waterCircle, RectangleF bounds)
+        {
+            percent = Math.Max(0.0, Math.Min(100.0, percent));
+            var waterTop = waterCircle.Top + waterCircle.Height * (1.0 - percent / 100.0);
+            var overWater = bounds.Top + bounds.Height / 2.0 >= waterTop - 1.0;
+            if (overWater)
+            {
+                var shadowBounds = new RectangleF(bounds.X, bounds.Y + 0.8f, bounds.Width, bounds.Height);
+                this.DrawMiniText(g, text, font, Color.FromArgb(118, 8, 22, 42), shadowBounds);
+                this.DrawMiniText(g, text, font, Color.White, bounds);
+                return;
+            }
+            this.DrawMiniText(g, text, font, this.theme.Text, bounds);
+        }
+
         private static void Raise(EventHandler handler)
         {
             if (handler != null) handler(null, EventArgs.Empty);
@@ -4612,6 +5985,474 @@ namespace CodexFloat
         }
     }
 
+    internal sealed class ExpandedDetailForm : Form
+    {
+        public event EventHandler CollapseRequested;
+        public event EventHandler MouseLeftExpanded;
+
+        private readonly ElementHost host = new ElementHost();
+        private readonly ContextMenuStrip menu;
+        private MonitorSnapshot snapshot = MonitorSnapshot.Loading();
+        private MonitorTheme theme = ThemePalette.Get("Graphite");
+        private int page;
+
+        public ExpandedDetailForm(ContextMenuStrip menu)
+        {
+            this.menu = menu;
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.ShowInTaskbar = false;
+            this.TopMost = true;
+            this.Size = new Size(600, 390);
+            this.BackColor = Color.White;
+            this.ContextMenuStrip = menu;
+            this.host.Dock = DockStyle.Fill;
+            this.host.BackColor = Color.White;
+            this.Controls.Add(this.host);
+            this.MouseLeave += delegate { Raise(this.MouseLeftExpanded); };
+            this.Rebuild();
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.ExStyle |= 0x80;
+                cp.ClassStyle |= 0x20000;
+                return cp;
+            }
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            using (var path = MiniBarForm.RoundRect(new Rectangle(0, 0, this.Width, this.Height), 12))
+            {
+                this.Region = new Region(path);
+            }
+        }
+
+        public void SetSnapshot(MonitorSnapshot value)
+        {
+            this.snapshot = value ?? MonitorSnapshot.Loading();
+            this.Rebuild();
+        }
+
+        public void SetTheme(MonitorTheme value)
+        {
+            this.theme = value ?? ThemePalette.Get("Graphite");
+            this.Rebuild();
+        }
+
+        public void SetLanguage()
+        {
+            this.Rebuild();
+        }
+
+        public bool ContainsCursor()
+        {
+            return this.Visible && this.ClientRectangle.Contains(this.PointToClient(Cursor.Position));
+        }
+
+        private void Rebuild()
+        {
+            if (this.host == null) return;
+            this.host.Child = this.BuildRoot();
+        }
+
+        private System.Windows.UIElement BuildRoot()
+        {
+            var root = new System.Windows.Controls.Canvas();
+            root.Width = 600;
+            root.Height = 390;
+            root.Background = Brush(this.theme.StandardSurface);
+            System.Windows.Media.TextOptions.SetTextFormattingMode(root, System.Windows.Media.TextFormattingMode.Display);
+            System.Windows.Media.TextOptions.SetTextRenderingMode(root, System.Windows.Media.TextRenderingMode.ClearType);
+            System.Windows.Media.TextOptions.SetTextHintingMode(root, System.Windows.Media.TextHintingMode.Fixed);
+            System.Windows.Media.RenderOptions.SetClearTypeHint(root, System.Windows.Media.ClearTypeHint.Enabled);
+            root.UseLayoutRounding = true;
+            root.SnapsToDevicePixels = true;
+            root.MouseRightButtonUp += delegate {
+                if (this.menu != null) this.menu.Show(this, this.PointToClient(Cursor.Position));
+            };
+            root.MouseLeave += delegate { Raise(this.MouseLeftExpanded); };
+
+            Add(root, this.Border(0, 0, 600, 390, this.theme.StandardSurface, this.theme.StandardBorder, 12));
+            Add(root, this.Rect(0, 42, 600, 1, Alpha(this.theme.StandardBorder, 180)));
+            this.AddLogo(root);
+            this.AddHeaderText(root, "CodexFloat", 61, 0, 190, 42, 17, System.Windows.TextAlignment.Left, this.theme.StandardText);
+            this.AddTab(root, T.IsChinese ? 397 : 360, T.IsChinese ? 74 : 108, DashboardText(), this.page == 0, delegate { this.page = 0; this.Rebuild(); });
+            this.AddTab(root, T.IsChinese ? 496 : 482, T.IsChinese ? 74 : 104, ResetCardsText(), this.page == 1, delegate { this.page = 1; this.Rebuild(); });
+
+            if (this.snapshot != null && this.snapshot.ErrorMessage != null)
+            {
+                this.AddError(root);
+            }
+            else if (this.page == 1)
+            {
+                this.AddResetCardsPage(root);
+            }
+            else
+            {
+                this.AddDashboardPage(root);
+            }
+            return root;
+        }
+
+        private void AddDashboardPage(System.Windows.Controls.Canvas root)
+        {
+            Add(root, Text((T.IsChinese ? "更新时间：" : "Updated: ") + this.snapshot.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"), 366, 55, 201, 22, 12.5, System.Windows.FontWeights.Normal, this.theme.StandardMuted, System.Windows.TextAlignment.Right));
+            this.AddIqList(root, 31, 70, 264, 173);
+            this.AddUsageBlock(root, 322, 80, this.snapshot.Usage.FiveHour, FiveHourLabel());
+            this.AddUsageBlock(root, 322, 167, this.snapshot.Usage.Weekly, WeeklyLabel());
+            var first = this.snapshot.ResetCards.Expirations.Count > 0 ? (DateTime?)this.snapshot.ResetCards.Expirations[0] : null;
+            this.AddResetTable(root, new Rectangle(31, 286, 537, 84), 42, 42, 1, 0, first.HasValue);
+        }
+
+        private void AddResetCardsPage(System.Windows.Controls.Canvas root)
+        {
+            this.AddResetTable(root, new Rectangle(31, 55, 537, 326), 43, 47, 6, 0, true);
+        }
+
+        private void AddError(System.Windows.Controls.Canvas root)
+        {
+            Add(root, this.Border(70, 134, 460, 128, Color.FromArgb(250, 253, 255), this.theme.StandardBorder, 10));
+            Add(root, Text(T.IsChinese ? "连接失败" : "Connection Failed", 100, 158, 400, 24, 15, System.Windows.FontWeights.Medium, this.theme.StandardText, System.Windows.TextAlignment.Center));
+            Add(root, Text(this.snapshot.ErrorMessage ?? "--", 100, 192, 400, 22, 12, System.Windows.FontWeights.Normal, this.theme.StandardMuted, System.Windows.TextAlignment.Center));
+            Add(root, Text((T.IsChinese ? "错误代码：" : "Code: ") + (this.snapshot.ErrorCode ?? "--"), 100, 220, 400, 18, 11, System.Windows.FontWeights.Normal, this.theme.StandardMuted, System.Windows.TextAlignment.Center));
+        }
+
+        private void AddIqCard(System.Windows.Controls.Canvas root, int x, int y, int index)
+        {
+            var cardColors = new[] {
+                Color.FromArgb(250, 247, 255),
+                Color.FromArgb(245, 252, 248),
+                Color.FromArgb(247, 250, 255),
+                Color.FromArgb(255, 248, 241)
+            };
+            var textColors = new[] {
+                Color.FromArgb(109, 40, 217),
+                Color.FromArgb(15, 137, 95),
+                Color.FromArgb(40, 104, 255),
+                Color.FromArgb(245, 96, 20)
+            };
+            var borders = new[] {
+                Color.FromArgb(225, 213, 255),
+                Color.FromArgb(203, 238, 217),
+                Color.FromArgb(214, 228, 250),
+                Color.FromArgb(255, 215, 189)
+            };
+            Add(root, this.Border(x, y, 126, 80, cardColors[index], borders[index], 8));
+            Add(root, Text(StandardIqLabel(index), x + 5, y + 13, 116, 20, 11.2, System.Windows.FontWeights.Normal, textColors[index], System.Windows.TextAlignment.Center));
+            var score = this.IqScore(index);
+            Add(root, Text(score, x + 8, y + 34, 110, 36, 28, System.Windows.FontWeights.Medium, textColors[index], System.Windows.TextAlignment.Center));
+        }
+
+        private void AddIqList(System.Windows.Controls.Canvas root, int x, int y, int width, int height)
+        {
+            var rowHeight = 31;
+            var gap = 4;
+            for (int i = 0; i < 5; i++)
+            {
+                this.AddIqListRow(root, x, y + i * (rowHeight + gap), width, rowHeight, i);
+            }
+        }
+
+        private void AddIqListRow(System.Windows.Controls.Canvas root, int x, int y, int width, int height, int index)
+        {
+            var cardColors = new[] {
+                Color.FromArgb(250, 247, 255),
+                Color.FromArgb(245, 252, 248),
+                Color.FromArgb(247, 250, 255),
+                Color.FromArgb(255, 248, 241),
+                Color.FromArgb(250, 252, 255)
+            };
+            var textColors = new[] {
+                Color.FromArgb(109, 40, 217),
+                Color.FromArgb(15, 137, 95),
+                Color.FromArgb(40, 104, 255),
+                Color.FromArgb(245, 96, 20),
+                Color.FromArgb(87, 104, 128)
+            };
+            var borders = new[] {
+                Color.FromArgb(225, 213, 255),
+                Color.FromArgb(203, 238, 217),
+                Color.FromArgb(214, 228, 250),
+                Color.FromArgb(255, 215, 189),
+                Color.FromArgb(215, 228, 243)
+            };
+            var score = this.ModelScore(index);
+            Add(root, this.Border(x, y, width, height, cardColors[index], borders[index], 7));
+            Add(root, Text(score.Label, x + 10, y + 0, width - 80, height, 11.4, System.Windows.FontWeights.Normal, textColors[index], System.Windows.TextAlignment.Left));
+            Add(root, Text(score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--", x + width - 74, y + 0, 64, height, 17, System.Windows.FontWeights.Medium, textColors[index], System.Windows.TextAlignment.Right));
+        }
+
+        private void AddUsageBlock(System.Windows.Controls.Canvas root, int x, int y, UsageWindow usage, string label)
+        {
+            var available = usage != null && usage.Available;
+            var pct = available ? usage.RemainingPercent : 0.0;
+            Add(root, Text(label, x, y, 85, 28, 20, System.Windows.FontWeights.Medium, this.theme.StandardAccent, System.Windows.TextAlignment.Left));
+            Add(root, Text(T.IsChinese ? "剩余" : "Remaining", x + 103, y + 2, 94, 24, 15.5, System.Windows.FontWeights.Medium, this.theme.StandardText, System.Windows.TextAlignment.Right));
+            Add(root, Text(available ? pct.ToString("0", CultureInfo.InvariantCulture) + "%" : "--", x + 198, y + 2, 48, 24, 16, System.Windows.FontWeights.Medium, this.theme.StandardText, System.Windows.TextAlignment.Right));
+            Add(root, this.Border(x, y + 40, 246, 6, this.theme.StandardProgressTrack, this.theme.StandardProgressTrack, 3));
+            Add(root, this.Border(x, y + 40, (int)Math.Round(246.0 * Math.Max(0.0, Math.Min(100.0, pct)) / 100.0), 6, this.theme.StandardAccent, this.theme.StandardAccent, 3));
+            Add(root, Text(ResetLine(usage), x, y + 53, 246, 20, 12.2, System.Windows.FontWeights.Normal, this.theme.StandardMuted, System.Windows.TextAlignment.Left));
+        }
+
+        private void AddResetTable(System.Windows.Controls.Canvas root, Rectangle table, int headerHeight, int rowHeight, int rows, int startIndex, bool showData)
+        {
+            Add(root, this.Border(table.Left, table.Top, table.Width, table.Height, this.theme.StandardSurface, this.theme.StandardBorder, 7));
+            Add(root, this.Rect(table.Left + 1, table.Top + 1, table.Width - 2, headerHeight - 1, this.theme.StandardTableHeader));
+            int c1 = table.Left + 166;
+            int c2 = table.Left + 355;
+            Add(root, this.Rect(c1, table.Top, 1, table.Height, Alpha(this.theme.StandardBorder, 170)));
+            Add(root, this.Rect(c2, table.Top, 1, table.Height, Alpha(this.theme.StandardBorder, 170)));
+            Add(root, this.Rect(table.Left, table.Top + headerHeight, table.Width, 1, Alpha(this.theme.StandardBorder, 170)));
+            for (int i = 1; i < rows; i++) Add(root, this.Rect(table.Left, table.Top + headerHeight + rowHeight * i, table.Width, 1, Alpha(this.theme.StandardBorder, 170)));
+
+            this.AddCell(root, T.IsChinese ? "重置卡编号" : "Reset Card", table.Left, table.Top, 166, headerHeight, 13, System.Windows.FontWeights.Medium);
+            this.AddCell(root, T.IsChinese ? "剩余时间" : "Remaining", c1 + 1, table.Top, 188, headerHeight, 13, System.Windows.FontWeights.Medium);
+            this.AddCell(root, T.IsChinese ? "到期时间" : "Expires At", c2 + 1, table.Top, table.Right - c2 - 1, headerHeight, 13, System.Windows.FontWeights.Medium);
+
+            for (int i = 0; i < rows; i++)
+            {
+                var y = table.Top + headerHeight + i * rowHeight;
+                var index = startIndex + i;
+                var hasCard = showData && this.snapshot.ResetCards.Expirations.Count > index;
+                var name = hasCard ? (T.IsChinese ? "卡片 " : "Card ") + (index + 1).ToString(CultureInfo.InvariantCulture) : "--";
+                var remaining = hasCard ? RemainingText(this.snapshot.ResetCards.Expirations[index]) : "--";
+                var expires = hasCard ? this.snapshot.ResetCards.Expirations[index].ToString("yyyy-MM-dd HH:mm") : "--";
+                this.AddCell(root, name, table.Left, y, 166, rowHeight, rows > 1 ? 14 : 13, System.Windows.FontWeights.Normal);
+                this.AddCell(root, remaining, c1 + 1, y, 188, rowHeight, rows > 1 ? 14 : 13, System.Windows.FontWeights.Normal);
+                this.AddCell(root, expires, c2 + 1, y, table.Right - c2 - 1, rowHeight, rows > 1 ? 14 : 13, System.Windows.FontWeights.Normal);
+            }
+        }
+
+        private void AddCell(System.Windows.Controls.Canvas root, string text, int x, int y, int width, int height, double fontSize, System.Windows.FontWeight weight)
+        {
+            var border = new System.Windows.Controls.Border();
+            border.Width = width;
+            border.Height = height;
+            var tb = new System.Windows.Controls.TextBlock();
+            tb.Text = text;
+            tb.FontFamily = AppFont();
+            tb.FontSize = fontSize;
+            tb.FontWeight = weight;
+            tb.Foreground = Brush(this.theme.StandardText);
+            tb.TextAlignment = System.Windows.TextAlignment.Center;
+            tb.VerticalAlignment = System.Windows.VerticalAlignment.Center;
+            tb.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch;
+            tb.TextTrimming = System.Windows.TextTrimming.CharacterEllipsis;
+            border.Child = tb;
+            Add(root, border, x, y);
+        }
+
+        private void AddTab(System.Windows.Controls.Canvas root, int x, int width, string text, bool active, System.Windows.Input.MouseButtonEventHandler handler)
+        {
+            var hit = new System.Windows.Controls.Border();
+            hit.Width = width;
+            hit.Height = 42;
+            hit.Background = System.Windows.Media.Brushes.Transparent;
+            hit.MouseLeftButtonUp += handler;
+            var tb = new System.Windows.Controls.TextBlock();
+            tb.Text = text;
+            tb.FontFamily = AppFont();
+            tb.FontSize = 17;
+            tb.FontWeight = System.Windows.FontWeights.Medium;
+            tb.Foreground = Brush(active ? this.theme.StandardAccent : this.theme.StandardText);
+            tb.TextAlignment = System.Windows.TextAlignment.Center;
+            tb.VerticalAlignment = System.Windows.VerticalAlignment.Center;
+            tb.TextTrimming = System.Windows.TextTrimming.None;
+            hit.Child = tb;
+            Add(root, hit, x, 0);
+            if (active) Add(root, this.Border(x + 6, 41, width - 12, 2, this.theme.StandardAccent, this.theme.StandardAccent, 1));
+        }
+
+        private void AddHeaderText(System.Windows.Controls.Canvas root, string text, int x, int y, int width, int height, double fontSize, System.Windows.TextAlignment align, Color color)
+        {
+            var border = new System.Windows.Controls.Border();
+            border.Width = width;
+            border.Height = height;
+            border.Background = System.Windows.Media.Brushes.Transparent;
+            var tb = new System.Windows.Controls.TextBlock();
+            tb.Text = text;
+            tb.FontFamily = AppFont();
+            tb.FontSize = fontSize;
+            tb.FontWeight = System.Windows.FontWeights.Medium;
+            tb.Foreground = Brush(color);
+            tb.TextAlignment = align;
+            tb.VerticalAlignment = System.Windows.VerticalAlignment.Center;
+            tb.HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch;
+            tb.TextTrimming = System.Windows.TextTrimming.None;
+            border.Child = tb;
+            Add(root, border, x, y);
+        }
+
+        private void AddLogo(System.Windows.Controls.Canvas root)
+        {
+            var hex = new System.Windows.Shapes.Polygon();
+            hex.Points = new System.Windows.Media.PointCollection(new[] {
+                new System.Windows.Point(30, 10),
+                new System.Windows.Point(39, 15),
+                new System.Windows.Point(39, 27),
+                new System.Windows.Point(30, 32),
+                new System.Windows.Point(21, 27),
+                new System.Windows.Point(21, 15)
+            });
+            hex.Stroke = Brush(this.theme.StandardAccent);
+            hex.StrokeThickness = 2.5;
+            hex.StrokeLineJoin = System.Windows.Media.PenLineJoin.Round;
+            hex.Fill = System.Windows.Media.Brushes.Transparent;
+            Add(root, hex);
+            Add(root, Text("C", 19, 10, 22, 22, 11, System.Windows.FontWeights.Medium, this.theme.StandardAccent, System.Windows.TextAlignment.Center));
+        }
+
+        private System.Windows.Controls.Border Border(int x, int y, int width, int height, Color fill, Color border, int radius)
+        {
+            var b = new System.Windows.Controls.Border();
+            b.Width = width;
+            b.Height = height;
+            b.Background = Brush(fill);
+            b.BorderBrush = Brush(border);
+            b.BorderThickness = new System.Windows.Thickness(1);
+            b.CornerRadius = new System.Windows.CornerRadius(radius);
+            b.SnapsToDevicePixels = true;
+            AddPosition(b, x, y);
+            return b;
+        }
+
+        private System.Windows.Shapes.Rectangle Rect(int x, int y, int width, int height, Color fill)
+        {
+            var r = new System.Windows.Shapes.Rectangle();
+            r.Width = width;
+            r.Height = height;
+            r.Fill = Brush(fill);
+            AddPosition(r, x, y);
+            return r;
+        }
+
+        private static System.Windows.Controls.TextBlock Text(string text, int x, int y, int width, int height, double size, System.Windows.FontWeight weight, Color color, System.Windows.TextAlignment align)
+        {
+            var tb = new System.Windows.Controls.TextBlock();
+            tb.Text = text;
+            tb.Width = width;
+            tb.Height = height;
+            tb.FontFamily = AppFont();
+            tb.FontSize = size;
+            tb.FontWeight = weight;
+            tb.Foreground = Brush(color);
+            tb.TextAlignment = align;
+            tb.VerticalAlignment = System.Windows.VerticalAlignment.Center;
+            tb.TextTrimming = System.Windows.TextTrimming.CharacterEllipsis;
+            tb.LineStackingStrategy = System.Windows.LineStackingStrategy.BlockLineHeight;
+            tb.LineHeight = Math.Max(size + 4, height);
+            AddPosition(tb, x, y);
+            return tb;
+        }
+
+        private static void Add(System.Windows.Controls.Canvas canvas, System.Windows.UIElement element)
+        {
+            canvas.Children.Add(element);
+        }
+
+        private static void Add(System.Windows.Controls.Canvas canvas, System.Windows.UIElement element, int x, int y)
+        {
+            AddPosition(element, x, y);
+            canvas.Children.Add(element);
+        }
+
+        private static void AddPosition(System.Windows.UIElement element, int x, int y)
+        {
+            System.Windows.Controls.Canvas.SetLeft(element, x);
+            System.Windows.Controls.Canvas.SetTop(element, y);
+        }
+
+        private static System.Windows.Media.FontFamily AppFont()
+        {
+            return new System.Windows.Media.FontFamily("Microsoft YaHei UI, Segoe UI, Noto Sans CJK SC, Noto Sans SC, Arial");
+        }
+
+        private static System.Windows.Media.SolidColorBrush Brush(Color color)
+        {
+            return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(color.A, color.R, color.G, color.B));
+        }
+
+        private static Color Alpha(Color color, int alpha)
+        {
+            return Color.FromArgb(alpha, color.R, color.G, color.B);
+        }
+
+        private ModelIqScore ModelScore(int index)
+        {
+            var radar = this.snapshot.ModelIq ?? ModelIqRadar.Empty();
+            if (radar.Scores.Count > index && radar.Scores[index] != null) return radar.Scores[index];
+            return new ModelIqScore(StandardIqLabel(index));
+        }
+
+        private string IqScore(int index)
+        {
+            var score = this.ModelScore(index);
+            return score.Available ? score.Score.ToString("0.#", CultureInfo.InvariantCulture) : "--";
+        }
+
+        private static string StandardIqLabel(int index)
+        {
+            switch (index)
+            {
+                case 0: return "GPT-5.6-Sol-ultra";
+                case 1: return "GPT-5.6-Sol-medium";
+                case 2: return "GPT-5.6-Sol-low";
+                case 3: return "GPT-5.6-Terra-medium";
+                default: return "GPT-5.6-Luna-medium";
+            }
+        }
+
+        private static string DashboardText()
+        {
+            return T.IsChinese ? "仪表盘" : "Dashboard";
+        }
+
+        private static string ResetCardsText()
+        {
+            return T.IsChinese ? "重置卡" : "Reset Cards";
+        }
+
+        private static string FiveHourLabel()
+        {
+            return T.IsChinese ? "5 小时" : "5h";
+        }
+
+        private static string WeeklyLabel()
+        {
+            return T.IsChinese ? "周" : "Weekly";
+        }
+
+        private static string ResetLine(UsageWindow usage)
+        {
+            if (usage == null || !usage.ResetAtLocal.HasValue) return (T.IsChinese ? "重置时间：" : "Reset: ") + "--";
+            return (T.IsChinese ? "重置时间：" : "Reset: ") + RemainingText(usage.ResetAtLocal.Value) + " (" + usage.ResetAtLocal.Value.ToString("yyyy-MM-dd HH:mm") + ")";
+        }
+
+        private static string RemainingText(DateTime expiration)
+        {
+            var remaining = expiration - DateTime.Now;
+            if (remaining.TotalSeconds < 0) remaining = TimeSpan.Zero;
+            if (remaining.TotalDays >= 1)
+            {
+                var days = ((int)Math.Floor(remaining.TotalDays)).ToString(CultureInfo.InvariantCulture);
+                var hours = remaining.Hours.ToString("00", CultureInfo.InvariantCulture);
+                return T.IsChinese ? days + "天 " + hours + "小时" : days + "d " + hours + "h";
+            }
+            var hourText = ((int)Math.Floor(remaining.TotalHours)).ToString(CultureInfo.InvariantCulture);
+            var minuteText = remaining.Minutes.ToString("00", CultureInfo.InvariantCulture);
+            return T.IsChinese ? hourText + "小时 " + minuteText + "分" : hourText + "h " + minuteText + "m";
+        }
+        private static void Raise(EventHandler handler)
+        {
+            if (handler != null) handler(null, EventArgs.Empty);
+        }
+    }
+
     internal sealed class TrustedEnvironmentsForm : Form
     {
         private readonly ListView list = new ListView();
@@ -4747,6 +6588,7 @@ namespace CodexFloat
         private readonly CheckBox scrollGpt55HighBox = new CheckBox();
         private readonly CheckBox scrollGpt55MediumBox = new CheckBox();
         private readonly CheckBox scrollGpt54XHighBox = new CheckBox();
+        private readonly CheckBox scrollGpt56LunaMediumBox = new CheckBox();
         private readonly CheckBox envCheckOnStartupBox = new CheckBox();
         private readonly CheckBox envConfirmMediumOnManualBox = new CheckBox();
         private readonly CheckBox envRecheckHighOnManualBox = new CheckBox();
@@ -4771,20 +6613,41 @@ namespace CodexFloat
                 }
             }
             this.Text = T.Text("CodexFloat 设置");
-            this.Size = new Size(860, 640);
+            this.Font = new Font("Segoe UI", 9f);
+            this.Size = new Size(580, 400);
+            this.MinimumSize = new Size(520, 360);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
-            var layout = new TableLayoutPanel();
-            layout.Dock = DockStyle.Fill;
-            layout.Padding = new Padding(16);
-            layout.ColumnCount = 2;
-            layout.RowCount = 10;
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            this.Controls.Add(layout);
+            var rootLayout = new TableLayoutPanel();
+            rootLayout.Dock = DockStyle.Fill;
+            rootLayout.Padding = new Padding(10);
+            rootLayout.RowCount = 2;
+            rootLayout.ColumnCount = 1;
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            this.Controls.Add(rootLayout);
+
+            var tabs = new TabControl();
+            tabs.Dock = DockStyle.Fill;
+            tabs.Font = this.Font;
+            rootLayout.Controls.Add(tabs, 0, 0);
+
+            var accountTab = new TabPage(T.Text("settings_account_tab"));
+            var displayTab = new TabPage(T.Text("settings_display_tab"));
+            var environmentTab = new TabPage(T.Text("env_safety_title"));
+            tabs.TabPages.Add(accountTab);
+            tabs.TabPages.Add(displayTab);
+            tabs.TabPages.Add(environmentTab);
+
+            var accountLayout = CreateSettingsTable();
+            var displayLayout = CreateSettingsTable();
+            var environmentLayout = CreateSettingsTable();
+            accountTab.Controls.Add(accountLayout);
+            displayTab.Controls.Add(displayLayout);
+            environmentTab.Controls.Add(environmentLayout);
 
             this.tokenBox.UseSystemPasswordChar = true;
             this.accountBox.UseSystemPasswordChar = true;
@@ -4797,7 +6660,8 @@ namespace CodexFloat
             this.opacityBox.Minimum = 35;
             this.opacityBox.Maximum = 100;
             this.opacityBox.Value = Math.Max(35, Math.Min(100, cfg.OpacityPercent));
-
+            this.refreshBox.TextAlign = HorizontalAlignment.Right;
+            this.opacityBox.TextAlign = HorizontalAlignment.Right;
             this.autoStartBox.Text = T.Text("开机自动启动");
             this.autoStartBox.AutoSize = true;
             this.autoStartBox.Checked = cfg.AutoStart || StartupManager.IsEnabled();
@@ -4831,6 +6695,9 @@ namespace CodexFloat
             this.scrollGpt54XHighBox.Text = T.Text("scroll_gpt_54_xhigh");
             this.scrollGpt54XHighBox.AutoSize = true;
             this.scrollGpt54XHighBox.Checked = cfg.ScrollShowGpt54XHigh;
+            this.scrollGpt56LunaMediumBox.Text = T.Text("scroll_gpt_56_luna_medium");
+            this.scrollGpt56LunaMediumBox.AutoSize = true;
+            this.scrollGpt56LunaMediumBox.Checked = cfg.ScrollShowGpt56LunaMedium;
             this.envCheckOnStartupBox.Text = T.Text("env_check_on_startup");
             this.envCheckOnStartupBox.AutoSize = true;
             this.envCheckOnStartupBox.Checked = cfg.EnvironmentCheckOnStartup;
@@ -4841,106 +6708,212 @@ namespace CodexFloat
             this.envRecheckHighOnManualBox.AutoSize = true;
             this.envRecheckHighOnManualBox.Checked = cfg.EnvironmentRecheckHighRiskOnManualRefresh;
             this.trustedEnvironmentsButton.Text = T.Text("env_trusted_library");
-            this.trustedEnvironmentsButton.Width = 150;
+            this.trustedEnvironmentsButton.Width = 190;
             this.trustedEnvironmentsButton.Height = 28;
             this.trustedEnvironmentsButton.Click += delegate { this.OpenTrustedEnvironments(); };
-
-            AddRow(layout, 0, "ACCESS_TOKEN", this.tokenBox);
-            AddRow(layout, 1, "ACCOUNT_ID", this.accountBox);
-            AddRow(layout, 2, T.Text("用量接口"), this.usageBox);
-            AddRow(layout, 3, T.Text("刷新秒数"), this.refreshBox);
-            AddRow(layout, 4, T.Text("不透明度"), this.opacityBox);
-
-            var behaviorPanel = new FlowLayoutPanel();
-            behaviorPanel.Dock = DockStyle.Fill;
-            behaviorPanel.FlowDirection = FlowDirection.LeftToRight;
-            behaviorPanel.WrapContents = true;
-            behaviorPanel.Padding = new Padding(0, 7, 0, 0);
-            behaviorPanel.Controls.Add(this.autoStartBox);
-            behaviorPanel.Controls.Add(this.topMostBox);
-            behaviorPanel.Controls.Add(this.clickThroughBox);
-            behaviorPanel.Controls.Add(this.lockPositionBox);
-            behaviorPanel.Controls.Add(this.showUserNameBox);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-            layout.Controls.Add(new Label { Text = T.Text("快捷设置"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 5);
-            layout.Controls.Add(behaviorPanel, 1, 5);
-
-            var scrollPanel = new FlowLayoutPanel();
-            scrollPanel.Dock = DockStyle.Fill;
-            scrollPanel.FlowDirection = FlowDirection.LeftToRight;
-            scrollPanel.WrapContents = true;
-            scrollPanel.Padding = new Padding(0, 5, 0, 0);
-            scrollPanel.Controls.Add(this.scroll5hBox);
-            scrollPanel.Controls.Add(this.scrollWeeklyBox);
-            scrollPanel.Controls.Add(this.scrollGpt55XHighBox);
-            scrollPanel.Controls.Add(this.scrollGpt55HighBox);
-            scrollPanel.Controls.Add(this.scrollGpt55MediumBox);
-            scrollPanel.Controls.Add(this.scrollGpt54XHighBox);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
-            layout.Controls.Add(new Label { Text = T.Text("滚动数据"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 6);
-            layout.Controls.Add(scrollPanel, 1, 6);
-
-            var envPanel = new FlowLayoutPanel();
-            envPanel.Dock = DockStyle.Fill;
-            envPanel.FlowDirection = FlowDirection.LeftToRight;
-            envPanel.WrapContents = true;
-            envPanel.Padding = new Padding(0, 5, 0, 0);
-            envPanel.Controls.Add(this.envCheckOnStartupBox);
-            envPanel.Controls.Add(this.envConfirmMediumOnManualBox);
-            envPanel.Controls.Add(this.envRecheckHighOnManualBox);
-            envPanel.Controls.Add(this.trustedEnvironmentsButton);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 74));
-            layout.Controls.Add(new Label { Text = T.Text("env_safety_title"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 7);
-            layout.Controls.Add(envPanel, 1, 7);
 
             var importPanel = new FlowLayoutPanel();
             importPanel.Dock = DockStyle.Fill;
             importPanel.FlowDirection = FlowDirection.LeftToRight;
-            importPanel.Padding = new Padding(0, 3, 0, 0);
+            importPanel.WrapContents = false;
+            importPanel.Padding = new Padding(0, 2, 0, 0);
             var autoImport = new Button();
             autoImport.Text = T.Text("自动读取");
             autoImport.Width = 110;
+            autoImport.Height = 28;
             autoImport.Click += delegate { this.AutoImportCredentials(); };
             importPanel.Controls.Add(autoImport);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            layout.Controls.Add(new Label { Text = T.Text("凭据"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 8);
-            layout.Controls.Add(importPanel, 1, 8);
+
+            AddSettingsPairRow(accountLayout, 0, "ACCESS_TOKEN", this.tokenBox, "ACCOUNT_ID", this.accountBox);
+            AddSettingsRow(accountLayout, 1, T.Text("用量接口"), this.usageBox);
+            AddSettingsPairRow(accountLayout, 2, T.Text("刷新秒数"), WrapLeft(this.refreshBox, 86), T.Text("凭据"), importPanel);
+
+            var behaviorPanel = CreateCheckboxList(
+                this.autoStartBox,
+                this.topMostBox,
+                this.clickThroughBox,
+                this.lockPositionBox,
+                this.showUserNameBox);
+
+            var scrollPanel = CreateCheckboxGrid(
+                this.scroll5hBox,
+                this.scrollWeeklyBox,
+                this.scrollGpt55XHighBox,
+                this.scrollGpt55HighBox,
+                this.scrollGpt55MediumBox,
+                this.scrollGpt54XHighBox,
+                this.scrollGpt56LunaMediumBox);
+            AddSettingsRow(displayLayout, 0, T.Text("不透明度"), WrapLeft(this.opacityBox, 86));
+            AddSettingsPairRow(displayLayout, 1, T.Text("快捷设置"), behaviorPanel, T.Text("滚动数据"), scrollPanel, 132);
+
+            var envPanel = CreateCheckboxList(
+                this.envCheckOnStartupBox,
+                this.envConfirmMediumOnManualBox,
+                this.envRecheckHighOnManualBox);
+            AddSettingsRow(environmentLayout, 0, T.Text("env_safety_title"), envPanel, 88);
+            AddSettingsRow(environmentLayout, 1, T.Text("env_trusted_library"), WrapLeft(this.trustedEnvironmentsButton, 210));
 
             this.hint.Text = T.Text("凭据提示");
             this.hint.Dock = DockStyle.Fill;
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.Controls.Add(this.hint, 1, 9);
+            this.hint.Padding = new Padding(0, 8, 2, 0);
+            accountLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            accountLayout.Controls.Add(new Label(), 0, 3);
+            accountLayout.Controls.Add(this.hint, 1, 3);
+            accountLayout.SetColumnSpan(this.hint, 3);
 
             var buttons = new FlowLayoutPanel();
             buttons.FlowDirection = FlowDirection.RightToLeft;
-            buttons.Dock = DockStyle.Bottom;
-            buttons.Height = 48;
-            buttons.Padding = new Padding(0, 6, 12, 8);
-            this.Controls.Add(buttons);
+            buttons.Dock = DockStyle.Fill;
+            buttons.WrapContents = false;
+            buttons.Padding = new Padding(0, 6, 0, 0);
+            rootLayout.Controls.Add(buttons, 0, 1);
 
             var save = new Button();
             save.Text = T.Text("保存");
             save.Width = 90;
+            save.Height = 28;
             save.Click += delegate { this.SaveAndClose(); };
             buttons.Controls.Add(save);
 
             var cancel = new Button();
             cancel.Text = T.Text("取消");
             cancel.Width = 90;
+            cancel.Height = 28;
             cancel.Click += delegate { this.DialogResult = DialogResult.Cancel; this.Close(); };
             buttons.Controls.Add(cancel);
         }
 
-        private static void AddRow(TableLayoutPanel layout, int row, string label, Control control)
+        private static TableLayoutPanel CreateSettingsTable()
         {
-            var lbl = new Label();
-            lbl.Text = label;
-            lbl.Dock = DockStyle.Fill;
-            lbl.TextAlign = ContentAlignment.MiddleLeft;
+            var layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill;
+            layout.Padding = new Padding(12, 12, 12, 8);
+            layout.ColumnCount = 4;
+            layout.RowCount = 8;
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            return layout;
+        }
+
+        private static Control WrapLeft(Control control, int width)
+        {
+            var panel = new Panel();
+            panel.Dock = DockStyle.Fill;
+            panel.Margin = Padding.Empty;
+            control.Dock = DockStyle.None;
+            control.Width = width;
+            control.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+            control.Location = new Point(0, 3);
+            panel.Controls.Add(control);
+            return panel;
+        }
+
+        private static TableLayoutPanel CreateVerticalStack(params Control[] controls)
+        {
+            var panel = new TableLayoutPanel();
+            panel.Dock = DockStyle.Fill;
+            panel.Margin = Padding.Empty;
+            panel.Padding = new Padding(0, 2, 0, 0);
+            panel.ColumnCount = 1;
+            panel.RowCount = controls.Length;
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < controls.Length; i++)
+            {
+                var control = controls[i];
+                control.Dock = DockStyle.Fill;
+                control.Margin = new Padding(0, 0, 0, 4);
+                panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+                panel.Controls.Add(control, 0, i);
+            }
+            return panel;
+        }
+
+        private static TableLayoutPanel CreateCheckboxList(params CheckBox[] boxes)
+        {
+            var panel = new TableLayoutPanel();
+            panel.Dock = DockStyle.Fill;
+            panel.Margin = Padding.Empty;
+            panel.Padding = new Padding(0, 2, 0, 0);
+            panel.ColumnCount = 1;
+            panel.RowCount = boxes.Length;
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                boxes[i].Dock = DockStyle.Fill;
+                boxes[i].Margin = new Padding(0, 0, 0, 2);
+                panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+                panel.Controls.Add(boxes[i], 0, i);
+            }
+            return panel;
+        }
+
+        private static TableLayoutPanel CreateCheckboxGrid(params CheckBox[] boxes)
+        {
+            var panel = new TableLayoutPanel();
+            panel.Dock = DockStyle.Fill;
+            panel.Margin = Padding.Empty;
+            panel.Padding = new Padding(0, 2, 0, 0);
+            panel.ColumnCount = 2;
+            panel.RowCount = (boxes.Length + 1) / 2;
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            for (int i = 0; i < panel.RowCount; i++)
+            {
+                panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            }
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                boxes[i].Dock = DockStyle.Fill;
+                boxes[i].Margin = new Padding(0, 0, 10, 2);
+                panel.Controls.Add(boxes[i], i % 2, i / 2);
+            }
+            return panel;
+        }
+
+        private static void AddSettingsRow(TableLayoutPanel layout, int row, string label, Control control)
+        {
+            AddSettingsRow(layout, row, label, control, 42);
+        }
+
+        private static void AddSettingsRow(TableLayoutPanel layout, int row, string label, Control control, int height)
+        {
+            var lbl = CreateSettingsLabel(label);
             control.Dock = DockStyle.Fill;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+            control.Margin = Padding.Empty;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             layout.Controls.Add(lbl, 0, row);
             layout.Controls.Add(control, 1, row);
+            layout.SetColumnSpan(control, 3);
+        }
+
+        private static void AddSettingsPairRow(TableLayoutPanel layout, int row, string leftLabel, Control leftControl, string rightLabel, Control rightControl)
+        {
+            AddSettingsPairRow(layout, row, leftLabel, leftControl, rightLabel, rightControl, 42);
+        }
+
+        private static void AddSettingsPairRow(TableLayoutPanel layout, int row, string leftLabel, Control leftControl, string rightLabel, Control rightControl, int height)
+        {
+            leftControl.Dock = DockStyle.Fill;
+            rightControl.Dock = DockStyle.Fill;
+            leftControl.Margin = Padding.Empty;
+            rightControl.Margin = Padding.Empty;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            layout.Controls.Add(CreateSettingsLabel(leftLabel), 0, row);
+            layout.Controls.Add(leftControl, 1, row);
+            layout.Controls.Add(CreateSettingsLabel(rightLabel), 2, row);
+            layout.Controls.Add(rightControl, 3, row);
+        }
+
+        private static Label CreateSettingsLabel(string text)
+        {
+            var lbl = new Label();
+            lbl.Text = text;
+            lbl.Dock = DockStyle.Fill;
+            lbl.TextAlign = ContentAlignment.MiddleRight;
+            lbl.Padding = new Padding(0, 0, 10, 0);
+            return lbl;
         }
 
         private void SaveAndClose()
@@ -4972,6 +6945,7 @@ namespace CodexFloat
             next.ScrollShowGpt55High = this.scrollGpt55HighBox.Checked;
             next.ScrollShowGpt55Medium = this.scrollGpt55MediumBox.Checked;
             next.ScrollShowGpt54XHigh = this.scrollGpt54XHighBox.Checked;
+            next.ScrollShowGpt56LunaMedium = this.scrollGpt56LunaMediumBox.Checked;
             next.EnvironmentCheckOnStartup = this.envCheckOnStartupBox.Checked;
             next.EnvironmentConfirmMediumRiskOnManualRefresh = this.envConfirmMediumOnManualBox.Checked;
             next.EnvironmentRecheckHighRiskOnManualRefresh = this.envRecheckHighOnManualBox.Checked;
@@ -5007,6 +6981,7 @@ namespace CodexFloat
             next.Originator = this.initial.Originator;
             next.OpenAIBeta = this.initial.OpenAIBeta;
             next.ThemeName = this.initial.ThemeName;
+            next.ExpandedUiStyle = ExpandedUiStyleOptions.Standard;
             next.Language = this.initial.Language;
             next.FloatingX = this.initial.FloatingX;
             next.FloatingY = this.initial.FloatingY;
@@ -5688,20 +7663,22 @@ namespace CodexFloat
                 case "隐藏详情": return "隐藏详情";
                 case "刷新": return "刷新";
                 case "设置": return "设置";
-                case "重置悬浮窗位置": return "重置悬浮窗位置";
                 case "帮助": return "帮助";
                 case "关于": return "关于";
                 case "检查更新": return "检查更新";
                 case "退出": return "退出";
                 case "外观": return "外观";
+                case "expanded_ui_style_menu": return "展开界面样式";
+                case "expanded_ui_standard": return "标准版";
                 case "快捷设置": return "快捷设置";
                 case "滚动数据": return "滚动数据";
                 case "scroll_5h": return "5h 剩余 & 重置";
                 case "scroll_weekly": return "Weekly 剩余 & 重置";
-                case "scroll_gpt_55_xhigh": return "GPT-5.5-XHigh IQ";
-                case "scroll_gpt_55_high": return "GPT-5.5-High IQ";
-                case "scroll_gpt_55_medium": return "GPT-5.5-Medium IQ";
-                case "scroll_gpt_54_xhigh": return "GPT-5.4-XHigh IQ";
+                case "scroll_gpt_55_xhigh": return "GPT-5.6-Sol-ultra IQ";
+                case "scroll_gpt_55_high": return "GPT-5.6-Sol-medium IQ";
+                case "scroll_gpt_55_medium": return "GPT-5.6-Sol-low IQ";
+                case "scroll_gpt_54_xhigh": return "GPT-5.6-Terra-medium IQ";
+                case "scroll_gpt_56_luna_medium": return "GPT-5.6-Luna-medium IQ";
                 case "开机自动启动": return "开机自动启动";
                 case "总是置顶": return "总是置顶";
                 case "鼠标穿透": return "鼠标穿透";
@@ -5778,6 +7755,8 @@ namespace CodexFloat
                 case "env_high_risk_wait_message": return "高风险环境已阻止查询。请更新环境配置后手动刷新。";
                 case "env_check_failed_title": return "环境检测失败";
                 case "env_check_failed_message": return "无法验证当前网络和 IP，已暂停连接 ChatGPT 接口。请检查网络后手动刷新。";
+                case "settings_account_tab": return "账户与接口";
+                case "settings_display_tab": return "显示与行为";
                 case "error_click_details": return "点击查看";
                 case "error_missing_credentials_summary": return "未找到登录";
                 case "error_missing_credentials_detail": return "未找到 Codex 登录凭据。请先启动 Codex 并确认已登录，然后在设置中使用自动读取，或手动保存 ACCESS_TOKEN 和 ACCOUNT_ID。";
@@ -5827,20 +7806,22 @@ namespace CodexFloat
                 case "隐藏详情": return "Hide Details";
                 case "刷新": return "Refresh";
                 case "设置": return "Settings";
-                case "重置悬浮窗位置": return "Reset Floating Position";
                 case "帮助": return "Help";
                 case "关于": return "About";
                 case "检查更新": return "Check Updates";
                 case "退出": return "Exit";
                 case "外观": return "Appearance";
+                case "expanded_ui_style_menu": return "Expanded UI Style";
+                case "expanded_ui_standard": return "Standard";
                 case "快捷设置": return "Behavior";
                 case "滚动数据": return "Scroll Data";
                 case "scroll_5h": return "5h Remaining & Reset";
                 case "scroll_weekly": return "Weekly Remaining & Reset";
-                case "scroll_gpt_55_xhigh": return "GPT-5.5-XHigh IQ";
-                case "scroll_gpt_55_high": return "GPT-5.5-High IQ";
-                case "scroll_gpt_55_medium": return "GPT-5.5-Medium IQ";
-                case "scroll_gpt_54_xhigh": return "GPT-5.4-XHigh IQ";
+                case "scroll_gpt_55_xhigh": return "GPT-5.6-Sol-ultra IQ";
+                case "scroll_gpt_55_high": return "GPT-5.6-Sol-medium IQ";
+                case "scroll_gpt_55_medium": return "GPT-5.6-Sol-low IQ";
+                case "scroll_gpt_54_xhigh": return "GPT-5.6-Terra-medium IQ";
+                case "scroll_gpt_56_luna_medium": return "GPT-5.6-Luna-medium IQ";
                 case "开机自动启动": return "Auto Start";
                 case "总是置顶": return "Always On Top";
                 case "鼠标穿透": return "Mouse Click-Through";
@@ -5915,6 +7896,8 @@ namespace CodexFloat
                 case "env_high_risk_wait_message": return "High-risk environment blocked querying. Update the environment and refresh manually.";
                 case "env_check_failed_title": return "Environment Check Failed";
                 case "env_check_failed_message": return "CodexFloat could not verify the current network and IP, so it paused ChatGPT API connections. Check the network and refresh manually.";
+                case "settings_account_tab": return "Account & API";
+                case "settings_display_tab": return "Display & Behavior";
                 case "error_click_details": return "Details";
                 case "error_missing_credentials_summary": return "Not Signed In";
                 case "error_missing_credentials_detail": return "No Codex login credentials were found. Start Codex and make sure you are signed in, then use Auto Import in Settings or manually save ACCESS_TOKEN and ACCOUNT_ID.";
